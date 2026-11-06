@@ -190,8 +190,12 @@ def refresh(store, name, credentials, fetch=request_json):
     old = store.db.execute("SELECT * FROM feeds WHERE name=?", (name,)).fetchone()
     now = utcnow()
     retry = store.meta("retry-feed:" + name, {})
-    if retry.get("until") and age_seconds(retry["until"]) < 0:
-        return {"source": name, "status": "backoff", "retry_at": retry["until"]}
+    deadlines = [retry.get("until")]
+    if name == "wordfence":
+        deadlines.append(store.meta("wordfence-next-request"))
+    until = max((x for x in deadlines if x), default=None)
+    if until and age_seconds(until) < 0:
+        return {"source": name, "status": "backoff", "retry_at": until}
     headers = {}
     if old:
         if old["etag"]:
@@ -204,6 +208,9 @@ def refresh(store, name, credentials, fetch=request_json):
             if not token:
                 raise MonitorError("Для WordPress требуется WORDFENCE_API_KEY в secrets_file")
             headers["Authorization"] = "Bearer " + token
+            # Reserve the provider budget before I/O, including interrupted downloads/parse failures.
+            with store.db:
+                store.set_meta("wordfence-next-request", (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=30)).isoformat(timespec="seconds"))
         streamed = name == "wordfence" and fetch is request_json
         status, response_headers, body = fetch(URLS[name], headers=headers, **({"record_stream": True} if streamed else {}))
         if status == 304:

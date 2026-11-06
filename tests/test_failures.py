@@ -17,6 +17,18 @@ from security_monitor.versions import wp_affected
 
 
 class FailureTests(unittest.TestCase):
+    def test_wordfence_attempt_budget_survives_interrupted_download(self):
+        from security_monitor import feeds
+        def interrupted(*a, **kw):
+            raise RuntimeError("interrupted before storing feed status")
+        with Store(self.cfg["state_dir"]) as store:
+            with self.assertRaises(RuntimeError):
+                feeds.refresh(store, "wordfence", {"WORDFENCE_API_KEY": "fake"}, interrupted)
+        with Store(self.cfg["state_dir"]) as store:
+            result = feeds.refresh(store, "wordfence", {"WORDFENCE_API_KEY": "fake"},
+                                   lambda *a, **kw: self.fail("No second API request"))
+            self.assertEqual(result["status"], "backoff")
+
     def test_baseline_marks_mixed_example_priorities(self):
         message = notifier.render(self.cfg, {"kind": "baseline", "count": 2, "counts": {"P1": 1, "P3": 1},
                  "details": [{"priority": "P1", "vuln": "CVE-2026-1111"}, {"priority": "P3", "vuln": "CVE-2026-2222"}]}, "P1")

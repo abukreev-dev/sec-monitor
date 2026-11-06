@@ -8,7 +8,7 @@ Ubuntu 24.04.4 LTS, x86_64, Python 3.12, systemd, 16 GiB host RAM. External scan
 
 | Check | Observed result |
 |---|---|
-| Automated suite | 69 tests pass locally (native DPKG test skipped on macOS); also run natively on Ubuntu |
+| Automated suite | 70 tests pass locally (native DPKG test skipped on macOS); also run natively on Ubuntu |
 | Real OS inventory/scan | Successful complete scan; subsequent identical scan produced no new finding events |
 | KEV | Real catalog fetched and validated; exact CVE enrichment exercised |
 | Application dependencies | Actual Trivy scan of a synthetic Python/Node project: 15 component findings; repeat produced no new events |

@@ -4,7 +4,7 @@ This is a pre-release monitor, not an assurance that a host is safe. Each adapte
 
 | Area | Implemented behavior | Limits |
 |---|---|---|
-| Ubuntu 24.04 x86_64 | Native DPKG/APT inventory and pinned Trivy rootfs scanning | End-to-end acceptance is recorded in OPERATIONS; arbitrary third-party builds are not fully covered |
+| Ubuntu 24.04 x86_64 | Native DPKG/APT inventory and pinned Trivy rootfs scanning | [Runtime verification](ACCEPTANCE_2026-11-06.md); arbitrary third-party builds are not fully covered |
 | Debian / other Ubuntu releases | Shared read-only DPKG/APT adapter | Experimental until runtime/installer evidence exists; timers require explicit `allow_untested_os` |
 | RPM, Alpine host, non-Linux | No host-adapter support | Unsupported; no success/zero-vulnerability claim |
 | APT fixes | Installed origin, vendor fixed build, candidate origin/version, hold and metadata age | Reads existing indexes only; missing successful-refresh stamp means availability unknown. An old package no longer present in repositories has unknown origin |

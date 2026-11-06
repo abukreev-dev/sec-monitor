@@ -15,6 +15,7 @@ The project is pre-release. There is currently no security-support SLA or stable
 - Advisory data and filenames are untrusted. Child processes use argv arrays, not shell interpolation. Telegram uses plain text, with previews disabled.
 - Trivy is pinned and checked against known SHA256 values. This authenticates it against the reviewed project pin, not an independently verified Sigstore identity. Review pins and upstream advisories before updating the dependency.
 - Secrets live outside Git in a 0600 file. Network and scanner errors omit raw requests/URLs. Scanner child processes do not inherit bot keys or SSH credentials.
+- Installed scan/health/digest units also hide the credentials file with `InaccessiblePaths`; manual CLI runs do not provide an equivalent filesystem sandbox.
 - OS origin, installed fix, repository availability and running-code state are separate claims. A missing result or failed scan never proves remediation.
 
 ## Privacy

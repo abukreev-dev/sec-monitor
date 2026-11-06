@@ -40,6 +40,7 @@ def unit_files(cfg):
     files = {}
     for job in JOBS:
         on_failure = "OnFailure=security-monitor-health.service\n" if job == "scan" else ""
+        hide_secrets = "InaccessiblePaths=-/etc/security-monitor/secrets.env\n" if job in {"scan", "health", "digest"} else ""
         files[f"security-monitor-{job}.service"] = f"""# {MARKER}
 [Unit]
 Description=Security Monitor {job} (read-only)
@@ -60,6 +61,7 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/var/lib/security-monitor
+{hide_secrets}
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
@@ -103,11 +105,15 @@ def plan(cfg, trivy_path=None):
 
 
 def owned():
+    if BASE.is_symlink():
+        return False
     p = BASE / ".managed"
     return p.is_file() and not p.is_symlink() and p.read_text().strip() == MARKER
 
 
 def retained_owned():
+    if ETC.is_symlink():
+        return False
     p = ETC / ".managed"
     return p.is_file() and not p.is_symlink() and p.read_text().strip() == MARKER
 
@@ -122,11 +128,13 @@ def install(cfg, trivy_path=None, secrets_source=None, dry_run=False):
     if dry_run:
         return description
     assert_root()
+    if any(p.is_symlink() for p in (BASE, ETC, DATA)):
+        raise MonitorError("Каталоги установки не должны быть symlink")
     checked_secrets = None
     if secrets_source:
         if not Path(secrets_source).is_file():
             raise MonitorError("Файл секретов не найден; установка не начата")
-        checked_secrets = config.secrets({**cfg, "secrets_file": str(Path(secrets_source).resolve())})
+        checked_secrets = config.secrets({**cfg, "secrets_file": str(Path(secrets_source).absolute())})
     if BASE.exists() and not owned():
         raise MonitorError("Каталог /opt/security-monitor занят; чужие файлы не изменены")
     if (ETC.exists() or DATA.exists()) and not (owned() or retained_owned()):

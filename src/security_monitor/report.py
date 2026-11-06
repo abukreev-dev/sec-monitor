@@ -4,6 +4,7 @@ import shlex
 from collections import Counter
 
 from .util import clean_text, safe_url
+from .labels import label
 
 
 def instructions(row):
@@ -72,7 +73,7 @@ def text_report(groups, limit=50):
     for g in groups[:limit] if limit else groups:
         lines += ["", f"[{g['priority']}] {g['vuln']} · {clean_text(g['component'])} · {g['scope']}",
                   "Установлено: " + ", ".join(clean_text(v) for v in g["installed"]),
-                  f"Применимость: {g['applicability']} | исправление: {g['fix_status']} | устранение: {g['remediation']}",
+                  f"Применимость: {label(g['applicability'])} | исправление: {label(g['fix_status'])} | устранение: {label(g['remediation'])}",
                   f"KEV: {'да' if g['kev'] else 'нет подтверждения'} | связанных компонентов: {g['links']}",
                   "Исправленная vendor-версия: " + (", ".join(g["vendor_fixed"]) or "неизвестно"),
                   "Доступно в репозитории: " + (", ".join(g["repo_fixed"]) or "не подтверждено"),

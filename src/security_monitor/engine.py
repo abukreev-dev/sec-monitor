@@ -121,6 +121,7 @@ def kev_ids(store, cfg):
 def enrich_kev(store, ids):
     changed = {}
     with store.db:
+        store.db.execute("BEGIN IMMEDIATE")
         for old in store.db.execute("SELECT * FROM findings WHERE remediation!='remediated_verified'").fetchall():
             data = json.loads(old["payload"])
             if data["vuln"] not in ids or data.get("kev"):
@@ -198,6 +199,9 @@ def scan_targets(store, cfg, target="os"):
                     snapshot["artifact"] = Path(result["artifact"]).name
                     verify = verify_os if kind == "os" else verify_dependency
                 snapshot["target_config"] = digest(item)
+                current_ids = kev_ids(store, cfg)
+                for row in rows:
+                    apply_priority(row, current_ids)
                 outcome = store.reconcile(scope, rows, snapshot, verify, duration=time.monotonic() - start)
                 outcomes.append({**outcome, "status": "fresh"})
             except (MonitorError, OSError) as exc:
@@ -217,6 +221,7 @@ def observe_updates(store, cfg):
     os_id = inventory.os_release().get("ID")
     changes = []
     with store.db:
+        store.db.execute("BEGIN IMMEDIATE")
         for old in store.db.execute("SELECT * FROM findings WHERE scope='os' AND remediation!='remediated_verified'").fetchall():
             data = json.loads(old["payload"])
             current = snapshot["packages"].get(old["component"])

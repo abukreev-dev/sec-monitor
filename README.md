@@ -39,7 +39,7 @@ flowchart LR
     F --> G[Telegram]
 ```
 
-**Pre-release:** Ubuntu 24.04 x86_64 OS scanning has runtime evidence. Debian and other releases are experimental until tested. A passing scan is not proof that a host is safe or uncompromised. Read the [coverage matrix](docs/COVERAGE.md).
+**Pre-release:** Ubuntu 24.04 x86_64 OS scanning has [runtime evidence](docs/ACCEPTANCE_2026-11-06.md). Debian and other releases are experimental until tested. A passing scan is not proof that a host is safe or uncompromised. Read the [coverage matrix](docs/COVERAGE.md).
 
 ## Quick start
 

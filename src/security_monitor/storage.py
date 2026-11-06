@@ -12,7 +12,7 @@ SCHEMA = 1
 
 
 def detail(item):
-    fields = ("vuln", "component_label", "installed", "applicability", "severity", "kev", "source", "url",
+    fields = ("vuln", "component_label", "installed", "applicability", "severity", "kev", "source", "url", "cvss", "published_at",
               "vendor_fixed", "upstream_fixed", "repo_fixed", "fix_status", "remediation", "notice")
     return {k: item[k] for k in fields if k in item}
 
@@ -97,6 +97,7 @@ class Store:
     def run_failed(self, scope, error, duration=0):
         now = utcnow()
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             prev = self.db.execute("SELECT status FROM runs WHERE scope=?", (scope,)).fetchone()
             self.db.execute("""INSERT INTO runs(scope,last_attempt,status,error,duration) VALUES(?,?,?,?,?)
               ON CONFLICT(scope) DO UPDATE SET last_attempt=excluded.last_attempt,status=excluded.status,
@@ -112,6 +113,7 @@ class Store:
         now = utcnow()
         changes = []
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             baseline = not self.meta("baseline:" + scope, False)
             previous = {r["key"]: r for r in self.db.execute("SELECT * FROM findings WHERE scope=?", (scope,))}
             present = set()
@@ -122,13 +124,18 @@ class Store:
                 present.add(key)
                 payload = dict(item)
                 payload.setdefault("remediation", "open")
-                fingerprint = digest(payload)
                 old = previous.get(key)
+                old_data = json.loads(old["payload"]) if old else {}
+                # A scan started before a KEV refresh must not erase positive exploitation evidence.
+                if old_data.get("kev"):
+                    payload["kev"] = True
+                    if payload["applicability"] == "affected":
+                        payload["priority"] = "P1"
+                fingerprint = digest(payload)
                 revision = old["revision"] + 1 if old else 1
                 first = old["first_seen"] if old else now
                 if not old or fingerprint != old["fingerprint"]:
                     kinds = ["new_finding"] if not old else []
-                    old_data = json.loads(old["payload"]) if old else {}
                     if old:
                         if old["remediation"] == "remediated_verified":
                             kinds.append("finding_reopened")
@@ -218,3 +225,14 @@ class Store:
         finally:
             target.close()
             destination.chmod(0o600)
+
+    def maintenance(self):
+        from .util import age_seconds
+        import datetime as dt
+        if age_seconds(self.meta("last-maintenance")) < 86400:
+            return
+        now = dt.datetime.now(dt.timezone.utc)
+        with self.db:
+            self.db.execute("DELETE FROM outbox WHERE sent_at IS NOT NULL AND sent_at<?", ((now - dt.timedelta(days=90)).isoformat(),))
+            self.db.execute("DELETE FROM run_history WHERE at<?", ((now - dt.timedelta(days=365)).isoformat(),))
+            self.set_meta("last-maintenance", utcnow())

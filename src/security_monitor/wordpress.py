@@ -78,7 +78,7 @@ def inventory(path):
 
 def match_findings(snapshot, feed):
     index = {}
-    for advisory in feed["records"]:
+    for advisory in sorted(feed["records"], key=lambda r: r["id"]):
         for software in advisory["software"]:
             index.setdefault((software["type"], software["slug"]), []).append((advisory, software))
     findings = []
@@ -100,20 +100,38 @@ def match_findings(snapshot, feed):
                     pass
             cvss = advisory.get("cvss") or {}
             score = cvss.get("score") if isinstance(cvss, dict) else None
-            severity = "CRITICAL" if isinstance(score, (int, float)) and score >= 9 else "HIGH" if isinstance(score, (int, float)) and score >= 7 else "UNKNOWN"
+            severity = "UNKNOWN"
+            if type(score) in {int, float} and 0 < score <= 10:
+                severity = "CRITICAL" if score >= 9 else "HIGH" if score >= 7 else "MEDIUM" if score >= 4 else "LOW"
             refs = advisory.get("references") or []
             url = next((x for x in refs if x.startswith("https://www.wordfence.com/")), "https://www.wordfence.com/threat-intel/vulnerabilities")
             findings.append({"component": component["kind"] + ":" + component["slug"],
                              "component_label": component["slug"], "vuln": advisory.get("cve") or "WORDFENCE-" + advisory["id"],
                              "aliases": ["WORDFENCE-" + advisory["id"]], "installed": component["version"],
                              "applicability": "affected" if certain else "potentially_affected",
-                             "upstream_fixed": fixed, "fix_status": "upstream_fix_available" if fixed else "no_fix_available",
+                             "upstream_fixed": sorted(set(fixed)), "fix_status": "upstream_fix_available" if fixed else "no_fix_available",
                              "repo_fixed": None, "severity": severity, "cvss": cvss, "source": "wordfence",
                              "url": safe_url(url), "published_at": advisory.get("published"),
                              "notice": feed["notices"].get(advisory["notice_key"], {}),
                              "title": advisory.get("title", ""), "confidence": "high" if certain else "low",
                              "runtime_verification": "file_metadata_only", "priority": "P2" if certain and severity in {"HIGH", "CRITICAL"} else "P3"})
-    return findings
+    unique = {}
+    for item in findings:
+        key = (item["component"], item["vuln"])
+        if key not in unique:
+            unique[key] = item
+            continue
+        previous = unique[key]
+        previous["aliases"] = sorted(set(previous["aliases"]) | set(item["aliases"]))
+        if previous["upstream_fixed"] != item["upstream_fixed"]:
+            # Do not claim a fix covers every advisory when its ranges disagree.
+            previous.update(upstream_fixed=[], fix_status="unknown")
+        if previous["notice"] != item["notice"]:
+            previous["notice"] = {"record_notices": [previous["notice"], item["notice"]]}
+        rank = {"UNKNOWN": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+        if rank[item["severity"]] > rank[previous["severity"]]:
+            previous["severity"], previous["cvss"] = item["severity"], item["cvss"]
+    return list(unique.values())
 
 
 def verify_missing(finding, snapshot):

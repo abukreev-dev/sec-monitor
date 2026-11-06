@@ -102,6 +102,7 @@ def drop_installed_privileges(cfg):
         os.setgid(user.pw_gid)
         os.setuid(user.pw_uid)
         os.environ["HOME"] = str(path)
+        os.chdir(path)
 
 
 def scheduled_scan(store, cfg, target):

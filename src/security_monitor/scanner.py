@@ -32,7 +32,7 @@ def executable(cfg):
             hasher.update(block)
     if hasher.hexdigest() != BINARY_SHA256:
         raise MonitorError("SHA256 бинарника Trivy не совпала с проверенным Linux x86_64 релизом")
-    text, _ = run([path, "--version", "--format", "json"], timeout=10)
+    text, _ = run([path, "--config=", "--version", "--format", "json"], timeout=10)
     try:
         version = json.loads(text)["Version"]
     except (ValueError, KeyError, TypeError):
@@ -131,6 +131,8 @@ def parse_result(path):
                 elif kind == "finding":
                     if not all(isinstance(obj.get(k), str) and obj[k] for k in ("id", "pkg", "installed")):
                         raise MonitorError("Trivy: неверная запись finding")
+                    if len(obj["id"]) > 200 or len(obj["pkg"]) > 1000 or len(obj["installed"]) > 256:
+                        raise MonitorError("Trivy: превышен размер идентификатора/версии")
                     if obj.get("severity") not in {"UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"}:
                         raise MonitorError("Trivy: неизвестная severity")
                     if not isinstance(obj.get("fixed", ""), str) or not isinstance(obj.get("source"), (dict, type(None))):
@@ -149,6 +151,8 @@ def scan(cfg, kind="os", path=None, image=None, archive=None):
     state = private_dir(cfg["state_dir"])
     artifacts = private_dir(state / "artifacts")
     cache = private_dir(state / "cache")
+    if shutil.disk_usage(state).free < 3 * 1024**3:
+        raise MonitorError("Свободного места меньше 3 GiB; скан не начат, чтобы не заполнить системный диск")
     binary = executable(cfg)
     temporary = artifacts / (".scan-" + uuid.uuid4().hex + ".jsonl")
     target = "rootfs" if kind == "os" else "fs" if kind == "apps" else "image"
@@ -169,6 +173,7 @@ def scan(cfg, kind="os", path=None, image=None, archive=None):
     started = time.monotonic()
     try:
         run(argv, timeout=cfg["scan_timeout"] + 20, max_output=1024 * 1024,
+            file_limit=2 * 1024**3,
             env={"GOMAXPROCS": "1", "GOMEMLIMIT": "600MiB", "TRIVY_DISABLE_TELEMETRY": "true",
                  "TMPDIR": str(private_dir(state / "tmp")), "DOCKER_CONFIG": str(private_dir(state / "registry"))})
         metadata = bounded_json(cache / "trivy/db/metadata.json")

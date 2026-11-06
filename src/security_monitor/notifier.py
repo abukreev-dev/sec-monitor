@@ -1,9 +1,26 @@
 """Telegram plain text, strict API acknowledgement, persistent retries."""
 import datetime as dt
 import json
+from zoneinfo import ZoneInfo
 
 from .feeds import HTTPFailure, request_json
 from .util import MonitorError, clean_text, lock, utcnow
+from .labels import label
+
+
+def cvss_text(value):
+    if not isinstance(value, dict):
+        return "неизвестно"
+    if type(value.get("score")) in {int, float}:
+        return str(value["score"]) + " " + str(value.get("vector", ""))
+    scores = []
+    for source, metrics in sorted(value.items()):
+        if isinstance(metrics, dict):
+            for version in ("V4", "V3", "V2"):
+                if type(metrics.get(version + "Score")) in {int, float}:
+                    scores.append(f"{metrics[version + 'Score']} ({version}, {source})")
+                    break
+    return ", ".join(scores[:3]) or "неизвестно"
 
 
 def render(cfg, payload, priority):
@@ -17,7 +34,7 @@ def render(cfg, payload, priority):
             lines.append("P1 требуют внимания: " + ", ".join(payload["p1_ids"]))
     elif kind == "changes":
         lines += ["Существенных событий: " + str(payload["count"]),
-                  "Изменения: " + ", ".join(payload.get("kinds", [])),
+                  "Изменения: " + ", ".join(label(x) for x in payload.get("kinds", [])),
                   "Уязвимости: " + ", ".join(payload.get("ids", []))]
     elif kind == "digest":
         lines += ["Ежедневная сводка", payload["text"]]
@@ -27,11 +44,13 @@ def render(cfg, payload, priority):
         fixed = d.get("repo_fixed") or d.get("vendor_fixed") or ", ".join(d.get("upstream_fixed", [])) or "не подтверждено"
         lines += ["", f"{d.get('vuln')} · {d.get('component_label')}",
                   "Установлено: " + str(d.get("installed", "неизвестно")),
-                  "Применимость: " + str(d.get("applicability", "unknown")),
-                  "Исправление: " + str(d.get("fix_status", "unknown")) + " / " + fixed,
+                  "Применимость: " + label(d.get("applicability", "unknown")),
+                  "CVSS: " + cvss_text(d.get("cvss")) + " / KEV: " + ("да" if d.get("kev") else "нет подтверждения"),
+                  "Исправление: " + label(d.get("fix_status", "unknown")) + " / " + fixed,
                   "Источник: " + str(d.get("source", "unknown")) + " " + str(d.get("url", ""))]
     lines += ["Монитор ничего не обновляет. Сверьте advisory и источник пакета; изменения выполняет администратор. Затем повторите scan.",
-              "Подробности и инструкции: security-monitor report", utcnow()]
+              "Подробности и инструкции: security-monitor report",
+              "Подготовлено: " + dt.datetime.now(ZoneInfo(cfg["timezone"])).isoformat(timespec="seconds")]
     for notice in payload.get("notices", []):
         lines += ["Attribution источника:", json.dumps(notice, ensure_ascii=False)]
     return "\n".join(clean_text(line, max(800, len(line))) for line in lines)

@@ -11,7 +11,7 @@ def dpkg_ge(installed, fixed):
     try:
         result = subprocess.run(["dpkg", "--compare-versions", installed, "ge", fixed],
                                 env=command_env(), stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=5)
+                                stderr=subprocess.DEVNULL, timeout=5, cwd="/")
     except (OSError, subprocess.TimeoutExpired):
         return None
     return True if result.returncode == 0 else False if result.returncode == 1 else None

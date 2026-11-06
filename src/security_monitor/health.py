@@ -5,6 +5,7 @@ from pathlib import Path
 
 from . import inventory, scanner
 from .util import MonitorError, age_seconds, digest, lock, utcnow, run as run_command
+from .labels import label
 
 
 def evaluate(store, cfg, doctor=False):
@@ -33,6 +34,13 @@ def evaluate(store, cfg, doctor=False):
                 unknown = sum(p.get("origin") not in {"Ubuntu", "Debian"} for p in packages.values())
                 adapters[-1]["coverage"] = {"mode": "partial" if gaps or unknown else "selected_components",
                                              "origin_gaps": unknown, "limitations": gaps}
+    configured_scopes = {scope for scope, _ in expected}
+    for row in store.db.execute("SELECT scope,last_success FROM runs"):
+        if row["scope"] not in configured_scopes:
+            count = store.db.execute("SELECT count(*) FROM findings WHERE scope=? AND remediation!='remediated_verified'", (row["scope"],)).fetchone()[0]
+            adapters.append({"name": row["scope"], "status": "disabled_with_open_findings" if count else "disabled",
+                             "last_success": row["last_success"], "findings": count,
+                             "note": "Область исключена из конфигурации; это не устранение находок"})
     sources = ["kev"] + (["wordfence"] if cfg["wordpress"] else [])
     for name in sources:
         row = store.db.execute("SELECT * FROM feeds WHERE name=?", (name,)).fetchone()
@@ -59,7 +67,11 @@ def evaluate(store, cfg, doctor=False):
         checks["sqlite"] = store.db.execute("PRAGMA quick_check").fetchone()[0]
         checks["free_disk_bytes"] = shutil.disk_usage(store.directory).free
         checks["systemd_available"] = bool(shutil.which("systemctl"))
-        if Path("/etc/security-monitor/.managed").exists() and checks["systemd_available"]:
+        try:
+            managed = Path("/etc/security-monitor/.managed").exists()
+        except OSError:
+            managed = False
+        if managed and checks["systemd_available"]:
             try:
                 value, _ = run_command(["systemctl", "show", "security-monitor-scan.service", "--property=Result", "--value"], timeout=5)
                 checks["last_scan_unit_result"] = value.strip()
@@ -69,7 +81,7 @@ def evaluate(store, cfg, doctor=False):
                 checks["last_scan_unit_result"] = "unknown"
         if checks["free_disk_bytes"] < 3 * 1024**3:
             warnings.append("Свободного места меньше 3 GiB; обновление DB может не поместиться")
-    degraded = any(a["status"] in {"error", "stale", "not_scanned", "not_loaded"} for a in adapters)
+    degraded = status["status"] == "unsupported" or any(a["status"] in {"error", "stale", "not_scanned", "not_loaded", "disabled_with_open_findings"} for a in adapters)
     degraded |= bool(outbox["failed"])
     if doctor:
         degraded |= checks.get("trivy") != "ok" or checks.get("sqlite") != "ok"
@@ -87,12 +99,13 @@ def record_health(store, cfg):
             with store.db:
                 store.set_meta("package-observation-error", "Не удалось проверить APT availability")
         report = evaluate(store, cfg, doctor=True)
+        store.maintenance()
         previous = store.meta("health-statuses", {})
         current = {a["name"]: a["status"] for a in report["adapters"]}
         with store.db:
             for name, status in current.items():
                 if status != previous.get(name) and status not in {"not_configured"}:
                     store.queue("health:" + digest([name, status, utcnow()]),
-                                {"kind": "health", "scope": name, "text": "Состояние проверки: " + status}, "SYSTEM")
+                                {"kind": "health", "scope": name, "text": "Состояние проверки: " + label(status)}, "SYSTEM")
             store.set_meta("health-statuses", current)
         return report

@@ -150,6 +150,69 @@ class FailureTests(unittest.TestCase):
                 scanner.scan(self.cfg)
         self.assertEqual(previous.read_text(), "previous-valid-result")
 
+    def test_child_commands_use_readable_root_cwd(self):
+        from security_monitor.util import run
+        text, _ = run([sys.executable, "-c", "import os; print(os.getcwd())"])
+        self.assertEqual(text.strip(), "/")
+
+    def test_child_file_size_limit_is_enforced(self):
+        from security_monitor.util import run
+        with self.assertRaises(MonitorError):
+            run([sys.executable, "-c", "import os; os.write(1,b'x'*65536); os.write(1,b'x')"], file_limit=1024)
+
+    def test_completed_scan_cannot_erase_new_kev_evidence(self):
+        from test_core import row
+        with Store(self.cfg["state_dir"]) as store:
+            store.reconcile("os", [row(kev=False)], {}, engine.verify_os)
+            engine.enrich_kev(store, {"CVE-2026-1234"})
+            store.reconcile("os", [row(kev=False)], {}, engine.verify_os)
+            result = list(store.findings())[0]
+            self.assertTrue(result["kev"])
+            self.assertEqual(result["priority"], "P1")
+
+    def test_removing_scope_does_not_hide_open_findings(self):
+        from test_core import row
+        with Store(self.cfg["state_dir"]) as store:
+            store.reconcile("apps:removed", [row()], {}, engine.verify_dependency)
+            report = health.evaluate(store, self.cfg)
+            self.assertIn("disabled_with_open_findings", [x["status"] for x in report["adapters"]])
+
+    def test_maintenance_never_deletes_unsent_notifications(self):
+        with Store(self.cfg["state_dir"]) as store:
+            with store.db:
+                store.queue("pending", {"kind": "test"})
+                store.queue("sent", {"kind": "test"})
+                store.db.execute("UPDATE outbox SET created_at='2000-01-01T00:00:00+00:00'")
+                store.db.execute("UPDATE outbox SET sent_at='2000-01-01T00:00:00+00:00' WHERE event_key='sent'")
+            store.maintenance()
+            rows = store.db.execute("SELECT event_key FROM outbox").fetchall()
+            self.assertEqual([r[0] for r in rows], ["pending"])
+
+    def test_wordfence_aliases_merge_without_inventing_fix(self):
+        from test_core import wf
+        from security_monitor import feeds, wordpress
+        data = wf()
+        second = json.loads(json.dumps(next(iter(data.values()))))
+        second["id"] = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        second["software"][0]["patched_versions"] = ["1.2.5"]
+        data[second["id"]] = second
+        snapshot = {"components": [{"kind": "plugin", "slug": "example", "version": "1.2.3", "source_verified": True}]}
+        rows = wordpress.match_findings(snapshot, feeds.validate_wordfence(data))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows[0]["aliases"]), 2)
+        self.assertEqual(rows[0]["fix_status"], "unknown")
+
+    def test_owned_installation_does_not_follow_directory_symlink(self):
+        target = self.root / "target"
+        target.mkdir()
+        (target / ".managed").write_text(deploy.MARKER)
+        link = self.root / "installation"
+        link.symlink_to(target, target_is_directory=True)
+        with patch("security_monitor.deploy.BASE", link):
+            self.assertFalse(deploy.owned())
+            with self.assertRaises(MonitorError):
+                deploy.uninstall(dry_run=True)
+
 
 if __name__ == "__main__":
     unittest.main()

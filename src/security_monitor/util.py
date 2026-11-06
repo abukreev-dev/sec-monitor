@@ -7,6 +7,7 @@ import json
 import os
 import re
 import signal
+import resource
 import subprocess
 import tempfile
 from pathlib import Path
@@ -128,18 +129,23 @@ def command_env(extra=None):
     return env
 
 
-def run(argv, timeout=30, max_output=16 * 1024 * 1024, env=None):
+def run(argv, timeout=30, max_output=16 * 1024 * 1024, env=None, file_limit=None):
     """No shell. Bound output on disk, kill the complete child process group."""
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
+            def child_limits():
+                if file_limit is not None:
+                    resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
             proc = subprocess.Popen([str(x) for x in argv], stdout=out, stderr=err,
-                                    env=command_env(env), start_new_session=True)
+                                    env=command_env(env), start_new_session=True, cwd="/",
+                                    preexec_fn=child_limits if file_limit is not None else None)
         except OSError:
             raise MonitorError(f"Не удалось запустить {Path(argv[0]).name}") from None
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
             proc.wait()
             raise MonitorError(f"Timeout: {Path(argv[0]).name}") from None
         out.seek(0)
@@ -150,7 +156,18 @@ def run(argv, timeout=30, max_output=16 * 1024 * 1024, env=None):
             raise MonitorError(f"Слишком большой ответ: {Path(argv[0]).name}")
         if proc.returncode:
             # Do not expose arbitrary tool output, URLs or config fragments.
-            raise MonitorError(f"{Path(argv[0]).name}: exit {proc.returncode}")
+            raw = diagnostic.decode("utf-8", "replace").lower()
+            category = ""
+            for needles, message in [
+                (("permission denied", "operation not permitted", "getwd:"), "недостаточно прав/недоступен рабочий каталог"),
+                (("no space left", "file too large"), "превышен дисковый лимит"),
+                (("429", "too many requests"), "источник ограничил частоту запросов"),
+                (("failed to download", "download error", "connection refused", "tls handshake"), "не удалось загрузить данные"),
+            ]:
+                if any(needle in raw for needle in needles):
+                    category = ": " + message
+                    break
+            raise MonitorError(f"{Path(argv[0]).name}: exit {proc.returncode}{category}")
         return data.decode("utf-8", "replace"), diagnostic.decode("utf-8", "replace")
 
 

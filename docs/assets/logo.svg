@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160" role="img" aria-label="Security Monitor">
+  <rect width="160" height="160" rx="36" fill="#0b1220"/>
+  <path d="M80 24 124 41v36c0 29-20 48-44 60-24-12-44-31-44-60V41Z" fill="#102b30" stroke="#34d399" stroke-width="5"/>
+  <path d="m57 64 15 14-15 14m26 0h23" fill="none" stroke="#d1fae5" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="119" cy="40" r="9" fill="#34d399" stroke="#0b1220" stroke-width="4"/>
+</svg>

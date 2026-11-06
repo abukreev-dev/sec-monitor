@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "server_name": "my-server",
+  "timezone": "UTC",
+  "state_dir": "/home/USER/.local/state/sec-monitor",
+  "trivy_path": "/home/USER/.local/state/sec-monitor/tools/trivy-0.76.2",
+  "secrets_file": "/home/USER/.config/sec-monitor/secrets.env",
+  "notifications_enabled": false,
+  "scan_timeout": 300,
+  "db_max_age_hours": 48,
+  "apt_max_age_hours": 48,
+  "feed_max_age_hours": 48,
+  "artifact_retention_days": 14,
+  "max_notifications_per_run": 10,
+  "discovery_roots": ["/var/www", "/srv"],
+  "apps": [],
+  "wordpress": [],
+  "containers": [],
+  "allow_untested_os": false
+}

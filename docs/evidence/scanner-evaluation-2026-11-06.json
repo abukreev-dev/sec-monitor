@@ -1,0 +1,210 @@
+{
+  "date": "2026-11-06",
+  "target": {
+    "os": "Ubuntu",
+    "version": "24.04.4 LTS",
+    "arch": "x86_64",
+    "host_ram_mib": 15934
+  },
+  "scanner_versions": {
+    "trivy": "0.76.2",
+    "vuls": "0.42.0"
+  },
+  "limits": {
+    "cpu_quota_percent": 100,
+    "swap_max_bytes": 0,
+    "trivy_compact_memory_max_gib": 1,
+    "trivy_compact_gomemlimit_mib": 600,
+    "vuls_final_memory_max_gib": 2,
+    "vuls_final_gomemlimit_mib": 1200
+  },
+  "metrics": [
+    {
+      "name": "vuls-scan-cold",
+      "rc": 0,
+      "wall_seconds": 2.186,
+      "peak_rss_kib": 62336,
+      "cpu_user_seconds": 0.08,
+      "cpu_system_seconds": 0.02,
+      "process_exit_status": 0,
+      "classification": "completed"
+    },
+    {
+      "name": "vuls-report-cold",
+      "rc": 0,
+      "wall_seconds": 69.845,
+      "classification": "interrupted_by_operator_after_db_download_not_a_completed_report"
+    },
+    {
+      "name": "vuls-report-warm-2g",
+      "rc": 1,
+      "wall_seconds": 36.101,
+      "classification": "cgroup_oom"
+    },
+    {
+      "name": "vuls-report-2g-gomem",
+      "rc": 0,
+      "wall_seconds": 67.525,
+      "peak_rss_kib": 2125520,
+      "cpu_user_seconds": 41.03,
+      "cpu_system_seconds": 3.9,
+      "process_exit_status": 0,
+      "classification": "completed"
+    },
+    {
+      "name": "trivy-cold",
+      "rc": 1,
+      "wall_seconds": 147.533,
+      "classification": "cgroup_oom"
+    },
+    {
+      "name": "trivy-warm-2g",
+      "rc": 0,
+      "wall_seconds": 6.57,
+      "peak_rss_kib": 1642076,
+      "cpu_user_seconds": 4.37,
+      "cpu_system_seconds": 0.87,
+      "process_exit_status": 0,
+      "classification": "completed"
+    },
+    {
+      "name": "trivy-warm-1g-gomem",
+      "rc": 1,
+      "wall_seconds": 5.894,
+      "classification": "cgroup_oom"
+    },
+    {
+      "name": "trivy-compact-1g",
+      "rc": 0,
+      "wall_seconds": 4.488,
+      "peak_rss_kib": 650972,
+      "cpu_user_seconds": 3.34,
+      "cpu_system_seconds": 0.39,
+      "process_exit_status": 0,
+      "classification": "completed"
+    },
+    {
+      "name": "trivy-compact-cold-1g",
+      "rc": 0,
+      "wall_seconds": 26.654,
+      "peak_rss_kib": 707320,
+      "cpu_user_seconds": 11.05,
+      "cpu_system_seconds": 4.78,
+      "process_exit_status": 0,
+      "classification": "completed"
+    },
+    {
+      "name": "trivy-compact-repeat-1g",
+      "rc": 0,
+      "wall_seconds": 3.658,
+      "peak_rss_kib": 705832,
+      "cpu_user_seconds": 3.18,
+      "cpu_system_seconds": 0.31,
+      "process_exit_status": 0,
+      "classification": "completed"
+    },
+    {
+      "name": "trivy-missing-db",
+      "rc": 1,
+      "wall_seconds": 0.144,
+      "peak_rss_kib": 111744,
+      "cpu_user_seconds": 0.06,
+      "cpu_system_seconds": 0.02,
+      "process_exit_status": 1,
+      "classification": "expected_missing_db_error"
+    }
+  ],
+  "trivy": {
+    "full_rows": 51424,
+    "compact_rows": 51424,
+    "distinct_cves": 4345,
+    "core_fields_equal": true,
+    "full_json_bytes": 222613156,
+    "compact_jsonl_bytes": 24714385,
+    "severity_rows": {
+      "MEDIUM": 34997,
+      "LOW": 10358,
+      "HIGH": 5817,
+      "CRITICAL": 252
+    },
+    "kernel_related_rows": 51219,
+    "fixed_version_rows": 6300
+  },
+  "comparison": {
+    "trivy_canonical_ids": 4345,
+    "vuls_canonical_ids": 4356,
+    "intersection": 4343,
+    "trivy_only": 2,
+    "vuls_only": 13,
+    "vuls_packages": 749,
+    "vuls_report_errors": [],
+    "vuls_report_complete": true,
+    "vuls_db_bytes": 14349406208
+  },
+  "versions": {
+    "unique_version_pairs": 1,
+    "dpkg_installed_lt_fixed_rc_counts": {
+      "0": 1
+    },
+    "all_sources_ubuntu": true
+  },
+  "repeat_semantic_findings_equal": true,
+  "state_checks_unchanged": {
+    "dpkg_status": true,
+    "apt_sources": true,
+    "sshd_config": true,
+    "apt_lists_metadata": true
+  },
+  "running_services_added_count": 0,
+  "running_services_removed_count": 0,
+  "trivy_db_bytes": 1675673600,
+  "trivy_db_metadata": {
+    "Version": 2,
+    "NextUpdate": "2026-11-07T12:55:02.577403513Z",
+    "UpdatedAt": "2026-11-06T12:55:02.577403897Z",
+    "DownloadedAt": "2026-11-06T15:22:51.779608546Z"
+  },
+  "trivy_missing_db_output_exists": false,
+  "not_tested": [
+    "Debian runtime",
+    "WordPress",
+    "application dependencies",
+    "container images",
+    "Telegram delivery",
+    "product lifecycle and outbox",
+    "whole-host 1GiB RAM operation",
+    "complete vulnerability accuracy audit"
+  ],
+  "binaries": [
+    {
+      "repo": "aquasecurity/trivy",
+      "tag": "v0.76.2",
+      "asset": "trivy_0.76.2_Linux-64bit.tar.gz",
+      "sha256": "bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf",
+      "bytes": 52714130,
+      "release_url": "https://github.com/aquasecurity/trivy/releases/tag/v0.76.2"
+    },
+    {
+      "repo": "future-architect/vuls",
+      "tag": "v0.42.0",
+      "asset": "vuls_0.42.0_linux_amd64.tar.gz",
+      "sha256": "6f549e092b2ed8d7be486152b9ce3516c862d6810844ea10185a43beedd759aa",
+      "bytes": 28101858,
+      "release_url": "https://github.com/future-architect/vuls/releases/tag/v0.42.0"
+    },
+    {
+      "repo": "vulsio/goval-dictionary",
+      "tag": "v0.15.3",
+      "asset": "goval-dictionary_0.15.3_linux_amd64.tar.gz",
+      "sha256": "1013a7144a9e39e8c80d291b661fd82a9ba3087f62772a84b83cd4ff06407d4e",
+      "bytes": 9761785,
+      "release_url": "https://github.com/vulsio/goval-dictionary/releases/tag/v0.15.3"
+    }
+  ],
+  "cleanup": {
+    "raw_reports_compressed": 7,
+    "removed_cache_and_download_bytes": 17791332577,
+    "remaining_lab_bytes": 358120350,
+    "raw_reports_are_private": true
+  }
+}

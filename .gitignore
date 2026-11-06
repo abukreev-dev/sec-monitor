@@ -1,0 +1,13 @@
+# Private experimental artifacts and host-specific evidence.
+.local/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.env
+secrets.env
+config.local.json
+*.sqlite3*
+.DS_Store

@@ -5,6 +5,7 @@ import stat
 import pwd
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from urllib.parse import urlsplit
 
 from .util import MonitorError, atomic_write, bounded_json, private_dir
 
@@ -21,7 +22,7 @@ def defaults():
             "db_max_age_hours": 48, "apt_max_age_hours": 48,
             "feed_max_age_hours": 48, "artifact_retention_days": 14,
             "secrets_file": str(Path.home() / ".config/sec-monitor/secrets.env"),
-            "notifications_enabled": False, "max_notifications_per_run": 10,
+            "notifications_enabled": False, "max_notifications_per_run": 10, "telegram_proxy_url": "",
             "apps": [], "wordpress": [], "containers": [],
             "discovery_roots": ["/var/www", "/srv"], "allow_untested_os": False}
 
@@ -57,6 +58,18 @@ def validate(cfg):
     for field in ("notifications_enabled", "allow_untested_os"):
         if type(cfg[field]) is not bool:
             raise MonitorError(f"{field}: ожидается boolean")
+    proxy = cfg["telegram_proxy_url"]
+    try:
+        parsed = urlsplit(proxy) if isinstance(proxy, str) else None
+        if proxy and (not parsed or parsed.scheme not in {"http", "https"} or not parsed.hostname or
+                      parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+            raise ValueError()
+        if parsed:
+            parsed.port
+        if parsed is None:
+            raise ValueError()
+    except ValueError:
+        raise MonitorError("telegram_proxy_url: требуется HTTP(S) proxy URL без credentials") from None
     try:
         ZoneInfo(cfg["timezone"])
     except (ZoneInfoNotFoundError, TypeError):

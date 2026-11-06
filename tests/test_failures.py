@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import sqlite3
 import sys
@@ -16,6 +17,63 @@ from security_monitor.versions import wp_affected
 
 
 class FailureTests(unittest.TestCase):
+    def test_baseline_marks_mixed_example_priorities(self):
+        message = notifier.render(self.cfg, {"kind": "baseline", "count": 2, "counts": {"P1": 1, "P3": 1},
+                 "details": [{"priority": "P1", "vuln": "CVE-2026-1111"}, {"priority": "P3", "vuln": "CVE-2026-2222"}]}, "P1")
+        self.assertIn("СВОДКА (максимум P1)", message)
+        self.assertIn("P3 · CVE-2026-2222", message)
+
+    def test_wordfence_429_waits_at_least_thirty_minutes(self):
+        from security_monitor import feeds
+        from security_monitor.util import age_seconds
+        def limited(*a, **kw):
+            raise HTTPFailure("API: HTTP 429", 60)
+        with Store(self.cfg["state_dir"]) as store:
+            self.assertEqual(feeds.refresh(store, "wordfence", {"WORDFENCE_API_KEY": "fake"}, limited)["status"], "error")
+            self.assertGreater(-age_seconds(store.meta("retry-feed:wordfence")["until"]), 1790)
+
+    def test_telegram_uses_explicit_proxy(self):
+        seen = {}
+        def accept(url, **kwargs):
+            seen.update(kwargs)
+            return 200, {}, {"ok": True, "result": {"message_id": 1}}
+        notifier.send({"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "fake"}, "test", accept,
+                      proxy_url="http://127.0.0.1:3128")
+        self.assertEqual(seen["proxy_url"], "http://127.0.0.1:3128")
+
+    def test_proxy_config_rejects_credentials_and_invalid_urls(self):
+        for value in (None, 42, "socks5://localhost:1080", "http://a:b@localhost:3128", "http://localhost:bad", "http://localhost/path"):
+            with self.subTest(value=value), self.assertRaises(MonitorError):
+                config.validate({**self.cfg, "telegram_proxy_url": value})
+        config.validate({**self.cfg, "telegram_proxy_url": "http://127.0.0.1:3128"})
+
+    def test_wordfence_stream_matches_full_validation(self):
+        from security_monitor import feeds
+        from test_core import wf
+        body = json.dumps(wf(), ensure_ascii=False).encode()
+        class Chunked(io.BytesIO):
+            def read(self, size=-1):
+                return super().read(min(size, 7))
+        self.assertEqual(feeds.read_wordfence(Chunked(body)), feeds.validate_wordfence(wf()))
+
+    def test_wordfence_stream_rejects_truncation_trailing_and_duplicate(self):
+        from security_monitor import feeds
+        from test_core import wf
+        raw = json.dumps(wf())
+        for body in (raw[:-1], raw + "{}", raw[:-1] + "," + raw[1:], "{}", raw + "\ufffd"):
+            with self.subTest(body=body[-15:]), self.assertRaises(MonitorError):
+                feeds.read_wordfence(io.BytesIO(body.encode()))
+        with self.assertRaises(MonitorError):
+            feeds.read_wordfence(io.BytesIO(b'{"x":"\xff"}'))
+
+    def test_wordfence_stream_size_limits(self):
+        from security_monitor import feeds
+        from test_core import wf
+        body = json.dumps(wf()).encode()
+        for limits in ({"limit": 10}, {"record_limit": 10}):
+            with self.subTest(limits=limits), self.assertRaises(MonitorError):
+                feeds.read_wordfence(io.BytesIO(body), **limits)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

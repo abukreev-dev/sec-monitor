@@ -24,7 +24,8 @@ def cvss_text(value):
 
 
 def render(cfg, payload, priority):
-    lines = [f"Security Monitor — {priority}", "Сервер: " + cfg["server_name"],
+    heading = f"СВОДКА (максимум {priority})" if payload.get("kind") == "baseline" else priority
+    lines = [f"Security Monitor — {heading}", "Сервер: " + cfg["server_name"],
              "Область: " + clean_text(payload.get("scope", "monitor"), 80)]
     kind = payload.get("kind")
     if kind == "baseline":
@@ -42,7 +43,7 @@ def render(cfg, payload, priority):
         lines.append(payload.get("text", "Проверка уведомлений"))
     for d in payload.get("details", []):
         fixed = d.get("repo_fixed") or d.get("vendor_fixed") or ", ".join(d.get("upstream_fixed", [])) or "не подтверждено"
-        lines += ["", f"{d.get('vuln')} · {d.get('component_label')}",
+        lines += ["", f"{d.get('priority', 'приоритет не указан')} · {d.get('vuln')} · {d.get('component_label')}",
                   "Установлено: " + str(d.get("installed", "неизвестно")),
                   "Применимость: " + label(d.get("applicability", "unknown")),
                   "CVSS: " + cvss_text(d.get("cvss")) + " / KEV: " + ("да" if d.get("kev") else "нет подтверждения"),
@@ -71,7 +72,7 @@ def message_parts(text, limit=3500):
     return parts
 
 
-def send(credentials, text, fetch=request_json):
+def send(credentials, text, fetch=request_json, proxy_url=None):
     token, chat = credentials.get("TELEGRAM_BOT_TOKEN"), credentials.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
         raise MonitorError("Telegram не настроен: нужны TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID")
@@ -79,7 +80,8 @@ def send(credentials, text, fetch=request_json):
         raise MonitorError("Telegram сообщение требует разбиения; содержимое не обрезано")
     body = json.dumps({"chat_id": chat, "text": text, "link_preview_options": {"is_disabled": True}}).encode()
     status, _, payload = fetch("https://api.telegram.org/bot" + token + "/sendMessage",
-                               headers={"Content-Type": "application/json"}, data=body, limit=65536)
+                               headers={"Content-Type": "application/json"}, data=body, limit=65536,
+                               **({"proxy_url": proxy_url} if proxy_url else {}))
     if status != 200 or not isinstance(payload, dict) or payload.get("ok") is not True:
         retry = (payload.get("parameters") or {}).get("retry_after", 60) if isinstance(payload, dict) else 60
         raise HTTPFailure("Telegram не подтвердил доставку", retry if isinstance(retry, int) else 60)
@@ -108,7 +110,7 @@ def flush(store, cfg, credentials, fetch=request_json):
                     with store.db:
                         store.db.execute("UPDATE outbox SET payload=? WHERE id=?", (json.dumps(payload, ensure_ascii=False), row["id"]))
                 while payload["_delivered_parts"] < len(payload["_parts"]) and results["parts_sent"] < cfg["max_notifications_per_run"]:
-                    send(credentials, payload["_parts"][payload["_delivered_parts"]], fetch)
+                    send(credentials, payload["_parts"][payload["_delivered_parts"]], fetch, cfg.get("telegram_proxy_url"))
                     payload["_delivered_parts"] += 1
                     results["parts_sent"] += 1
                     with store.db:

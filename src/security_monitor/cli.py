@@ -209,7 +209,7 @@ def main(argv=None):
                     return 0
                 loaded_secrets = config.secrets(cfg)
                 if args.notify_action == "test":
-                    identifier = notifier.send(loaded_secrets, notifier.render(cfg, {"kind": "test", "text": "Тестовое сообщение: канал работает. Обновления серверного ПО не выполняются."}, "TEST"))
+                    identifier = notifier.send(loaded_secrets, notifier.render(cfg, {"kind": "test", "text": "Тестовое сообщение: канал работает. Обновления серверного ПО не выполняются."}, "TEST"), proxy_url=cfg["telegram_proxy_url"])
                     output({"status": "accepted_by_telegram", "message_id": identifier, "read_by_user": "unknown"})
                     return 0
                 if args.notify_action == "retry-failed":

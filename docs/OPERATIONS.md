@@ -26,6 +26,10 @@
 
 После долгой работы без канала просмотрите очередь и отчёт до первого flush. Wordfence требует личный ключ и собственные условия/attribution. Без ключа настроенная WordPress-область сообщает об ошибке; отсутствие WordPress в настройках не является ошибкой.
 
+Если Telegram требует прокси, задайте `"telegram_proxy_url": "http://127.0.0.1:3128"` в JSON. Поддерживается HTTP(S) CONNECT без proxy credentials; TLS до Telegram проверяется стандартным клиентом. Настройка действует только на Telegram. Переменные HTTP_PROXY/HTTPS_PROXY окружения не используются для запросов API монитора. Прокси должен уже работать и быть доступен сервисному пользователю; монитор его не устанавливает и не перенастраивает.
+
+Wordfence production разбирается по одной записи без хранения полного исходного JSON в памяти: общий лимит 512 MiB, отдельная запись ограничена. Неполный/невалидный каталог не заменяет предыдущий кэш. При HTTP 429 пауза составляет минимум 30 минут (или больше по Retry-After); штатное успешное обновление — не чаще часа. [Wordfence описывает базовый лимит один запрос в 30 минут](https://www.wordfence.com/blog/2026/02/important-notice-preserving-free-access-while-evolving-the-wordfence-intelligence-vulnerability-api/).
+
 ## Установка и команды
 
 `install --dry-run` показывает собственный footprint. Установка требует root и не вызывает APT. Пути: `/opt/security-monitor/releases`, `current`, `/etc/security-monitor`, `/var/lib/security-monitor`, launcher `/usr/local/bin/security-monitor`. Config root-owned 0640; секреты сервисного пользователя 0600; данные 0700. Таймеры включаются отдельно.

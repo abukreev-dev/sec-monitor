@@ -6,6 +6,7 @@
   "trivy_path": "/home/USER/.local/state/sec-monitor/tools/trivy-0.76.2",
   "secrets_file": "/home/USER/.config/sec-monitor/secrets.env",
   "notifications_enabled": false,
+  "telegram_proxy_url": "",
   "scan_timeout": 300,
   "db_max_age_hours": 48,
   "apt_max_age_hours": 48,

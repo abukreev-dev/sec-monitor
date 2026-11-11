@@ -5,12 +5,17 @@ from collections import Counter
 
 from .util import clean_text, safe_url
 from .labels import label
+from . import actions
 
 
 def instructions(row):
+    plan = row.get("action") or actions.recommendation(row)
+    prefix = ["Что делать: " + plan["summary"], *(["Почему: " + plan["reason"]] if plan.get("reason") else []), *plan.get("steps", [])]
     if row["applicability"] != "affected":
-        return ["Применимость не подтверждена. Проверьте происхождение пакета/slug и advisory; не применяйте Ubuntu-фикс к сторонней сборке автоматически."]
-    result = []
+        return prefix + ["Применимость не подтверждена. Проверьте происхождение пакета/slug и advisory; не применяйте Ubuntu-фикс к сторонней сборке автоматически."]
+    if row.get("kernel_state") in {"running_affected_fix_installed", "running_fixed_old_package"}:
+        return prefix
+    result = prefix
     if row.get("source") in {"ubuntu", "debian"}:
         package = row["component"]
         if row.get("repo_fixed") and row.get("fix_status") == "repo_fix_available":
@@ -49,6 +54,7 @@ def grouped(store, priorities=None, open_only=True):
                            "installed": set(), "vendor_fixed": set(), "upstream_fixed": set(), "repo_fixed": set(),
                            "instructions": instructions(row), "notice": row.get("notice", {}),
                            "runtime_verification": row.get("runtime_verification", "unknown")}
+            groups[key].update({k: row.get(k) for k in ("action", "running_kernel", "kernel_state", "fixed_kernel", "scanner_status", "applicability_reason")})
         group = groups[key]
         group["links"] += 1
         group["installed"].add(row["installed"])

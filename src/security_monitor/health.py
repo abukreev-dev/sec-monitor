@@ -34,6 +34,10 @@ def evaluate(store, cfg, doctor=False):
                 unknown = sum(p.get("origin") not in {"Ubuntu", "Debian"} for p in packages.values())
                 adapters[-1]["coverage"] = {"mode": "partial" if gaps or unknown else "selected_components",
                                              "origin_gaps": unknown, "limitations": gaps}
+                if scope == "os":
+                    adapters[-1]["runtime"] = {"running_kernel": data.get("running_kernel"),
+                                               "reboot_required": data.get("reboot_required"),
+                                               "observed_at": data.get("observed_at")}
     configured_scopes = {scope for scope, _ in expected}
     for row in store.db.execute("SELECT scope,last_success FROM runs"):
         if row["scope"] not in configured_scopes:

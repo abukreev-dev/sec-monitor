@@ -10,7 +10,7 @@ import sqlite3
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import __version__, config, deploy, engine, health, inventory, notifier, report, scanner
+from . import __version__, actions, config, deploy, engine, health, inventory, notifier, report, scanner
 from .storage import Store
 from .util import BusyError, MonitorError, atomic_write, digest, json_text, private_dir, redact, utcnow
 
@@ -226,9 +226,9 @@ def main(argv=None):
                 date = dt.datetime.now(ZoneInfo(cfg["timezone"])).date().isoformat()
                 current = health.evaluate(store, cfg)
                 text = f"Группы уязвимостей: {len(groups)}; {counts}. Мониторинг: {current['status']}."
-                with store.db:
-                    store.queue("digest:" + date, {"kind": "digest", "scope": "monitor", "text": text})
-                output({"status": "queued", "date": date})
+                queued = store.queue_digest(date, {"kind": "digest", "scope": "monitor", "text": text,
+                                                  "actions": actions.summaries(groups)})
+                output({"status": "queued" if queued else "already_queued", "date": date})
                 return 0
             if cmd == "backup":
                 store.backup(args.destination)

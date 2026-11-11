@@ -4,16 +4,19 @@ import json
 import os
 import sqlite3
 import uuid
+from collections import Counter
 from pathlib import Path
 
 from .util import MonitorError, digest, json_text, private_dir, utcnow
+from . import actions
 
 SCHEMA = 1
 
 
 def detail(item):
     fields = ("vuln", "component_label", "priority", "installed", "applicability", "severity", "kev", "source", "url", "cvss", "published_at",
-              "vendor_fixed", "upstream_fixed", "repo_fixed", "fix_status", "remediation", "notice")
+              "vendor_fixed", "upstream_fixed", "repo_fixed", "fix_status", "remediation", "notice",
+              "scanner_status", "applicability_reason", "action", "kernel_state", "running_kernel", "fixed_kernel")
     return {k: item[k] for k in fields if k in item}
 
 
@@ -23,10 +26,11 @@ def message_details(items):
         d = item.get("detail", item)
         if d.get("notice"):
             notices[digest(d["notice"])] = d["notice"]
-        if d.get("vuln") not in seen and len(examples) < 3:
-            seen.add(d.get("vuln"))
+        key = (d.get("vuln"), (d.get("action") or actions.recommendation(d))["code"])
+        if key not in seen and len(examples) < 3:
+            seen.add(key)
             examples.append({k: v for k, v in detail(d).items() if k != "notice"})
-    return {"details": examples, "notices": list(notices.values())}
+    return {"details": examples, "actions": actions.summaries(examples), "notices": list(notices.values())}
 
 
 class Store:
@@ -64,6 +68,7 @@ class Store:
           attempts INTEGER NOT NULL DEFAULT 0, next_retry TEXT, last_error TEXT);
         CREATE TABLE IF NOT EXISTS feeds(name TEXT PRIMARY KEY, last_success TEXT, last_attempt TEXT,
           status TEXT NOT NULL, error TEXT, etag TEXT, modified TEXT, payload TEXT);
+        CREATE TABLE IF NOT EXISTS digest_events(event_key TEXT PRIMARY KEY REFERENCES events(event_key), digested_at TEXT);
         """)
         self.db.execute(f"PRAGMA user_version={SCHEMA}")
         self.db.commit()
@@ -93,6 +98,38 @@ class Store:
         self.db.execute("INSERT OR IGNORE INTO events(event_key,finding_key,scope,kind,created_at,payload) VALUES(?,?,?,?,?,?)",
                         (key, finding_key, scope, kind, utcnow(), json_text(payload)))
         return {"key": key, "kind": kind, **payload}
+
+    def notify_changes(self, scope, changes):
+        immediate = []
+        actionable = {"kev_added", "fix_published", "repo_fix_available", "update_detected",
+                      "remediation_verified", "finding_reopened", "kernel_runtime_changed"}
+        for change in changes:
+            kev_review = change["kind"] == "new_finding" and change.get("detail", {}).get("kev")
+            if change["priority"] == "P3" and change["kind"] not in actionable and not kev_review:
+                self.db.execute("INSERT OR IGNORE INTO digest_events(event_key) VALUES(?)", (change["key"],))
+            else:
+                immediate.append(change)
+        for priority in ("P1", "P2", "P3"):
+            selected = [x for x in immediate if x["priority"] == priority]
+            if selected:
+                self.queue(digest([x["key"] for x in selected]), {"kind": "changes", "scope": scope,
+                           "count": len(selected), "ids": sorted({x["vuln"] for x in selected})[:12],
+                           "kinds": sorted({x["kind"] for x in selected}), **message_details(selected)}, priority)
+
+    def queue_digest(self, date, payload):
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            key = "digest:" + date
+            if self.db.execute("SELECT 1 FROM outbox WHERE event_key=?", (key,)).fetchone():
+                return False
+            counts, ids = Counter(), set()
+            for row in self.db.execute("SELECT e.kind,e.payload FROM digest_events d JOIN events e USING(event_key) WHERE d.digested_at IS NULL"):
+                counts[row["kind"]] += 1
+                ids.add(json.loads(row["payload"]).get("vuln"))
+            self.queue(key, {**payload, "deferred_events": sum(counts.values()), "deferred_kinds": dict(counts),
+                             "deferred_cves": len(ids - {None})})
+            self.db.execute("UPDATE digest_events SET digested_at=? WHERE digested_at IS NULL", (utcnow(),))
+            return True
 
     def run_failed(self, scope, error, duration=0):
         now = utcnow()
@@ -129,8 +166,9 @@ class Store:
                 # A scan started before a KEV refresh must not erase positive exploitation evidence.
                 if old_data.get("kev"):
                     payload["kev"] = True
-                    if payload["applicability"] == "affected":
+                    if payload["applicability"] == "affected" and payload.get("kernel_state") != "running_fixed_old_package":
                         payload["priority"] = "P1"
+                payload["action"] = actions.recommendation(payload)
                 fingerprint = digest(payload)
                 revision = old["revision"] + 1 if old else 1
                 first = old["first_seen"] if old else now
@@ -150,6 +188,8 @@ class Store:
                             kinds.append("repo_fix_available")
                         if old["priority"] != payload["priority"]:
                             kinds.append("priority_changed")
+                        if old_data.get("kernel_state") and (old_data.get("kernel_state"), old_data.get("running_kernel")) != (payload.get("kernel_state"), payload.get("running_kernel")):
+                            kinds.append("kernel_runtime_changed")
                         if not kinds:
                             kinds.append("evidence_changed")
                     self.db.execute("""INSERT OR REPLACE INTO findings VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
@@ -169,13 +209,14 @@ class Store:
                 data = json.loads(old["payload"])
                 resolution = verify_missing(data, snapshot)
                 updated = {**data, **resolution}
+                updated["action"] = actions.recommendation(updated)
                 if digest(updated) != old["fingerprint"]:
                     revision = old["revision"] + 1
-                    self.db.execute("UPDATE findings SET revision=?,fingerprint=?,remediation=?,payload=? WHERE key=?",
-                                    (revision, digest(updated), updated["remediation"], json_text(updated), key))
+                    self.db.execute("UPDATE findings SET revision=?,fingerprint=?,priority=?,remediation=?,payload=? WHERE key=?",
+                                    (revision, digest(updated), updated["priority"], updated["remediation"], json_text(updated), key))
                     kind = "remediation_verified" if updated["remediation"] == "remediated_verified" else "needs_reverification"
                     changes.append(self.event(scope, kind, key, revision,
-                                              {"vuln": old["vuln"], "component": old["component"], "priority": old["priority"],
+                                              {"vuln": old["vuln"], "component": old["component"], "priority": updated["priority"],
                                                "before": detail(data), "detail": detail(updated)}))
             previous_run = self.db.execute("SELECT status FROM runs WHERE scope=?", (scope,)).fetchone()
             self.db.execute("INSERT OR REPLACE INTO runs VALUES(?,?,?,?,?,?,?)", (scope, now, now, "fresh", None, duration, len(present)))
@@ -194,12 +235,7 @@ class Store:
                                                  "counts": counts, "p1_ids": sorted(ids)[:12],
                                                  **message_details(sorted(rows, key=lambda x: x["priority"]))}, "P1" if ids else "P3")
             elif changes:
-                for priority in ("P1", "P2", "P3"):
-                    selected = [x for x in changes if x["priority"] == priority]
-                    if selected:
-                        self.queue(digest([x["key"] for x in selected]), {"kind": "changes", "scope": scope,
-                                   "count": len(selected), "ids": sorted({x["vuln"] for x in selected})[:12],
-                                   "kinds": sorted({x["kind"] for x in selected}), **message_details(selected)}, priority)
+                self.notify_changes(scope, changes)
             if previous_run and previous_run[0] == "error":
                 self.queue("scan-recovered:" + digest([scope, now]), {"kind": "health", "scope": scope, "text": "Проверка восстановлена"}, "SYSTEM")
         return {"scope": scope, "findings": len(present), "events": len(changes), "baseline": baseline}

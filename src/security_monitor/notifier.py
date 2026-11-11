@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from .feeds import HTTPFailure, request_json
 from .util import MonitorError, clean_text, lock, utcnow
 from .labels import label
+from . import actions
 
 
 def cvss_text(value):
@@ -28,17 +29,26 @@ def render(cfg, payload, priority):
     lines = [f"Security Monitor — {heading}", "Сервер: " + cfg["server_name"],
              "Область: " + clean_text(payload.get("scope", "monitor"), 80)]
     kind = payload.get("kind")
+    plans = payload.get("actions") or actions.summaries(payload.get("details", []))
+    for plan in plans:
+        lines += ["", "Что делать: " + plan["summary"]]
+        if plan.get("reason"):
+            lines.append("Почему: " + plan["reason"])
+        lines.extend(plan.get("steps", []))
     if kind == "baseline":
         lines += ["Первичная сводка", "Связей компонент–уязвимость: " + str(payload["count"]),
                   "Приоритеты: " + ", ".join(f"{p}: {n}" for p, n in sorted(payload["counts"].items()))]
         if payload.get("p1_ids"):
             lines.append("P1 требуют внимания: " + ", ".join(payload["p1_ids"]))
     elif kind == "changes":
-        lines += ["Существенных событий: " + str(payload["count"]),
+        lines += ["Событий: " + str(payload["count"]) + " (не число новых CVE)",
                   "Изменения: " + ", ".join(label(x) for x in payload.get("kinds", [])),
                   "Уязвимости: " + ", ".join(payload.get("ids", []))]
     elif kind == "digest":
         lines += ["Ежедневная сводка", payload["text"]]
+        if payload.get("deferred_events"):
+            lines += [f"Справочные события P3: {payload['deferred_events']}; уникальных CVE: {payload['deferred_cves']}.",
+                      ", ".join(f"{label(k)}: {v}" for k, v in sorted(payload["deferred_kinds"].items()))]
     else:
         lines.append(payload.get("text", "Проверка уведомлений"))
     for d in payload.get("details", []):
@@ -46,6 +56,7 @@ def render(cfg, payload, priority):
         lines += ["", f"{d.get('priority', 'приоритет не указан')} · {d.get('vuln')} · {d.get('component_label')}",
                   "Установлено: " + str(d.get("installed", "неизвестно")),
                   "Применимость: " + label(d.get("applicability", "unknown")),
+                  "Оценка: " + d.get("applicability_reason", "см. источник и локальный отчёт"),
                   "CVSS: " + cvss_text(d.get("cvss")) + " / KEV: " + ("да" if d.get("kev") else "нет подтверждения"),
                   "Исправление: " + label(d.get("fix_status", "unknown")) + " / " + fixed,
                   "Источник: " + str(d.get("source", "unknown")) + " " + str(d.get("url", ""))]

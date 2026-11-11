@@ -137,6 +137,8 @@ def parse_result(path):
                         raise MonitorError("Trivy: неизвестная severity")
                     if not isinstance(obj.get("fixed", ""), str) or not isinstance(obj.get("source"), (dict, type(None))):
                         raise MonitorError("Trivy: неизвестная схема evidence")
+                    if obj.get("status") is not None and (not isinstance(obj["status"], str) or len(obj["status"]) > 64):
+                        raise MonitorError("Trivy: неверный статус применимости")
                     findings.append(obj)
                 else:
                     raise MonitorError("Trivy: неизвестная запись")

@@ -3,7 +3,7 @@ import json
 import time
 from pathlib import Path
 
-from . import feeds, inventory, scanner, wordpress
+from . import actions, feeds, inventory, scanner, wordpress
 from .util import MonitorError, age_seconds, clean_text, digest, json_text, lock, private_dir, safe_url, utcnow
 from .versions import dpkg_ge
 from .storage import detail, message_details
@@ -23,7 +23,7 @@ def score(cvss):
 
 def apply_priority(row, kev_ids):
     row["kev"] = row["vuln"] in kev_ids or row.get("kev", False)
-    if row["applicability"] != "affected":
+    if row["applicability"] != "affected" or row.get("kernel_state") == "running_fixed_old_package":
         row["priority"] = "P3"
     elif row["kev"]:
         row["priority"] = "P1"
@@ -48,7 +48,7 @@ def normalize(result, snapshot, kind, cfg, kev_ids):
     packages = snapshot.get("packages", {})
     expected = "Ubuntu" if snapshot.get("platform", {}).get("id") == "ubuntu" else "Debian"
     scan_packages = result["packages"]
-    rows = {}
+    rows, kernel_cache = {}, {}
     for item in result["findings"]:
         name = item["pkg"]
         package = scan_packages.get((item.get("target", ""), item.get("pkg_id", "")), {})
@@ -73,20 +73,31 @@ def normalize(result, snapshot, kind, cfg, kev_ids):
             component = name + ":" + digest([item.get("target"), item.get("pkg_path"), item.get("pkg_id"), arch])[:16]
             trusted = bool(item.get("source"))
             fix, repo, origin = ("upstream_fix_available" if item.get("fixed") else "no_fix_known"), None, "lockfile_or_image"
+        status = item.get("status") or "unknown"
+        uncertain = status not in {"affected", "fixed", "will_not_fix", "fix_deferred", "end_of_life"}
+        # Ubuntu's compact advisory does not preserve the full vendor triage state.
+        if kind == "os" and vendor == "ubuntu" and not item.get("fixed"):
+            uncertain = True
         row = {"component": component, "component_label": name, "vuln": item["id"],
                "installed": item["installed"], "vendor_fixed": item.get("fixed") if kind == "os" else None,
                "upstream_fixed": [item["fixed"]] if kind != "os" and item.get("fixed") else [],
                "repo_fixed": repo, "fix_status": fix, "origin": origin,
                "source_package": native.get("source_package", package.get("SrcName") or name),
-               "held": native.get("held", False), "applicability": "affected" if trusted else "potentially_affected",
+               "held": native.get("held", False), "applicability": "affected" if trusted and not uncertain else "potentially_affected",
+               "scanner_status": status,
+               "applicability_reason": "Применимость по пакету и исправленной vendor-версии" if trusted and not uncertain else
+                   "Оценка поставщика не подтверждена независимо; статус Trivy: " + status if trusted else "Происхождение/версия пакета не подтверждены",
                "severity": item["severity"], "cvss": item.get("cvss") or {},
                "source": (item.get("source") or {}).get("ID", "unknown"),
                "url": safe_url(item.get("url")) or safe_url((item.get("source") or {}).get("URL")),
                "published_at": item.get("published"), "modified_at": item.get("modified"),
-               "title": item.get("title", ""), "confidence": "high" if trusted else "low",
+               "title": item.get("title", ""), "confidence": "high" if trusted and not uncertain else "low",
                "runtime_verification": "installed_package_only" if kind == "os" else "declared_dependency_or_image_only"}
         key = (component, row["vuln"])
+        if kind == "os":
+            actions.kernel_evidence(row, snapshot, kernel_cache)
         apply_priority(row, kev_ids)
+        row["action"] = actions.recommendation(row)
         if key in rows and rows[key] != row:
             raise MonitorError("Неоднозначные дубли компонента Trivy; нужна ручная проверка")
         rows[key] = row
@@ -94,18 +105,23 @@ def normalize(result, snapshot, kind, cfg, kev_ids):
 
 
 def verify_os(finding, snapshot):
+    runtime = dict(finding)
+    actions.kernel_evidence(runtime, snapshot)
+    apply_priority(runtime, set())
+    context = {k: runtime[k] for k in ("kernel_state", "running_kernel", "fixed_kernel", "runtime_verification", "priority")
+               if k in runtime} if "kernel_state" in runtime else {}
     current = snapshot.get("packages", {}).get(finding["component"])
     if not current:
-        return {"remediation": "needs_reverification", "verification": "Компонент больше не найден; это не доказательство установленного фикса"}
+        return {**context, "remediation": "needs_reverification", "verification": "Компонент больше не найден; это не доказательство установленного фикса"}
     if current["version"] != finding["installed"]:
         expected = "Ubuntu" if snapshot["platform"]["id"] == "ubuntu" else "Debian"
         fixed = finding.get("vendor_fixed")
         if fixed and current["origin"] == expected and dpkg_ge(current["version"], fixed) is True:
             # Runtime kernel/library restarts are a separate observation; never inferred.
-            return {"remediation": "remediated_verified", "observed_version": current["version"],
+            return {**context, "remediation": "remediated_verified", "observed_version": current["version"],
                     "verification": "Исправленная vendor-версия установлена; свежий OS-скан не находит CVE. Runtime/restart не подтверждён"}
-        return {"remediation": "update_installed_pending_verification", "observed_version": current["version"]}
-    return {"remediation": "needs_reverification", "verification": "CVE исчезла без изменения версии; требуется подтверждение"}
+        return {**context, "remediation": "update_installed_pending_verification", "observed_version": current["version"]}
+    return {**context, "remediation": "needs_reverification", "verification": "CVE исчезла без изменения версии; требуется подтверждение"}
 
 
 def verify_dependency(finding, snapshot):
@@ -219,6 +235,8 @@ def observe_updates(store, cfg):
         return {"status": "recent"}
     snapshot = inventory.package_inventory()
     os_id = inventory.os_release().get("ID")
+    snapshot.update(platform={"id": os_id}, running_kernel=inventory.platform.release())
+    kernel_cache = {}
     changes = []
     with store.db:
         store.db.execute("BEGIN IMMEDIATE")
@@ -234,20 +252,20 @@ def observe_updates(store, cfg):
                 event_kind = "update_detected"
             fix, candidate = apt_fix(current, data.get("vendor_fixed"), {**cfg, "os_id": os_id}, snapshot["apt_age_seconds"])
             updated.update(fix_status=fix, repo_fixed=candidate, held=current["held"])
+            actions.kernel_evidence(updated, snapshot, kernel_cache)
+            apply_priority(updated, set())
+            updated["action"] = actions.recommendation(updated)
+            if data.get("kernel_state") and (data.get("kernel_state"), data.get("running_kernel")) != (updated.get("kernel_state"), updated.get("running_kernel")):
+                event_kind = "kernel_runtime_changed"
             if data.get("fix_status") != "repo_fix_available" and fix == "repo_fix_available":
                 event_kind = "repo_fix_available"
             if digest(updated) != old["fingerprint"]:
                 revision = old["revision"] + 1
-                store.db.execute("UPDATE findings SET revision=?,fingerprint=?,remediation=?,payload=? WHERE key=?",
-                                 (revision, digest(updated), updated.get("remediation", "open"), json_text(updated), old["key"]))
+                store.db.execute("UPDATE findings SET revision=?,fingerprint=?,priority=?,remediation=?,payload=? WHERE key=?",
+                                 (revision, digest(updated), updated["priority"], updated.get("remediation", "open"), json_text(updated), old["key"]))
                 if event_kind:
                     changes.append(store.event("os", event_kind, old["key"], revision,
-                                   {"vuln": old["vuln"], "component": old["component"], "priority": old["priority"], "detail": detail(updated)}))
-        for priority in ("P1", "P2", "P3"):
-            selected = [c for c in changes if c["priority"] == priority]
-            if selected:
-                store.queue(digest([x["key"] for x in selected]), {"kind": "changes", "scope": "os", "count": len(selected),
-                            "ids": sorted({x["vuln"] for x in selected})[:12], "kinds": sorted({x["kind"] for x in selected}),
-                            **message_details(selected)}, priority)
+                                   {"vuln": old["vuln"], "component": old["component"], "priority": updated["priority"], "detail": detail(updated)}))
+        store.notify_changes("os", changes)
         store.set_meta("last-package-observation", utcnow())
     return {"status": "fresh", "events": len(changes)}

@@ -144,7 +144,7 @@ def discover_projects(roots, budget=5, limit=10000):
 def discover(cfg, include_packages=True):
     info = os_release()
     result = {"observed_at": utcnow(), "platform": platform_status(info), "arch": platform.machine(),
-              "running_kernel": platform.release(), "uid": os.geteuid(),
+              "running_kernel": platform.release(), "reboot_required": Path("/var/run/reboot-required").exists(), "uid": os.geteuid(),
               "tools": {name: bool(shutil.which(name)) for name in ("dpkg-query", "apt-cache", "systemctl", "docker", "php", "wp")},
               "projects": discover_projects(cfg["discovery_roots"]), "limitations": []}
     if include_packages and result["platform"]["status"] != "unsupported":

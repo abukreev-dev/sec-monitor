@@ -2,6 +2,7 @@
 LABELS = {
     "affected": "подтверждена", "potentially_affected": "возможна, требуется проверка",
     "unknown": "неизвестно", "not_affected": "не затронуто",
+    "under_investigation": "поставщик уточняет применимость", "kernel_runtime_changed": "изменение работающего ядра/готовности исправления",
     "open": "открыто", "remediated_verified": "пакетное исправление проверено",
     "needs_reverification": "нужна перепроверка",
     "update_installed_pending_verification": "изменение версии обнаружено, проверка не завершена",

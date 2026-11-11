@@ -78,6 +78,8 @@ Omit `--secrets-file` for local-only operation. Installation manages only the mo
 
 Applicability, fix availability, remediation and monitoring health are independent. A published patch is not necessarily in your repository or installed. A missing CVE is not proof of remediation. Installed packages, running kernels and deployed dependencies are distinct observations.
 
+Alerts lead with an operator action and its evidence. Routine P3 metadata changes go to the daily digest; actionable fix/KEV/runtime changes remain immediate. A suitable fixed kernel already installed while an affected kernel is running produces a planned-reboot recommendation. Unverified vendor triage remains potential applicability, with the original scanner status retained.
+
 P1 requires confirmed applicability plus known exploitation. P2 covers confirmed high-risk findings; P3 includes lower-risk and uncertain matches. Full Internet-exposure/RCE inference is not implemented. Custom builds and third-party origins may require manual review.
 
 Trivy is an external pinned engine: no scanner fork is required. An [Ubuntu experiment](docs/SCANNER_EVALUATION_2026-11-06.md) measured compact scanner output at roughly 0.6–0.7 GiB RSS and about 4 seconds warm. These are one-host scanner measurements, not a whole-product minimum-RAM guarantee.

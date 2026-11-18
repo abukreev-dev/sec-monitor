@@ -107,7 +107,22 @@ def record_health(store, cfg):
         previous = store.meta("health-statuses", {})
         current = {a["name"]: a["status"] for a in report["adapters"]}
         with store.db:
+            os_adapter = next((a for a in report["adapters"] if a["name"] == "os"), None)
+            last_success = os_adapter.get("last_success") if os_adapter else None
+            os_overdue = not last_success or age_seconds(last_success) > 8 * 3600
+            alerted = store.meta("os-monitor-alerted", False)
+            if os_overdue and not alerted:
+                reason = (os_adapter or {}).get("error") or "нет свежего успешного сканирования"
+                store.queue("os-monitor:" + digest(["overdue", utcnow()]),
+                            {"kind": "health", "scope": "os", "text": "Нет свежего успешного сканирования ОС за последние 8 часов: " + reason + ". Нужна диагностика монитора."}, "SYSTEM")
+                store.set_meta("os-monitor-alerted", True)
+            elif not os_overdue and alerted and os_adapter and os_adapter["status"] == "fresh":
+                store.queue("os-monitor:" + digest(["recovered", utcnow()]),
+                            {"kind": "health", "scope": "os", "text": "Проверка ОС восстановлена, данные снова свежие. Действия не требуются."}, "SYSTEM")
+                store.set_meta("os-monitor-alerted", False)
             for name, status in current.items():
+                if name in {"os", "scheduler:scan"}:
+                    continue
                 if status != previous.get(name) and status not in {"not_configured"}:
                     store.queue("health:" + digest([name, status, utcnow()]),
                                 {"kind": "health", "scope": name, "text": "Состояние проверки: " + label(status)}, "SYSTEM")

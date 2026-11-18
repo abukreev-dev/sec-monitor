@@ -142,7 +142,7 @@ class Store:
               error=excluded.error,duration=excluded.duration""", (scope, now, "error", error, duration))
             self.db.execute("INSERT INTO run_history(scope,at,status,duration,payload) VALUES(?,?,?,?,?)",
                             (scope, now, "error", duration, json_text({"error": error})))
-            if not prev or prev[0] != "error":
+            if scope != "os" and (not prev or prev[0] != "error"):
                 key = "scan-failed:" + digest([scope, now])
                 self.queue(key, {"kind": "health", "scope": scope, "text": "Ошибка проверки: " + error}, "SYSTEM")
 
@@ -237,7 +237,7 @@ class Store:
                                                  **message_details(sorted(rows, key=lambda x: x["priority"]))}, "P1" if ids else "P3")
             elif changes:
                 self.notify_changes(scope, changes)
-            if previous_run and previous_run[0] == "error":
+            if scope != "os" and previous_run and previous_run[0] == "error":
                 self.queue("scan-recovered:" + digest([scope, now]), {"kind": "health", "scope": scope, "text": "Проверка восстановлена"}, "SYSTEM")
         return {"scope": scope, "findings": len(present), "events": len(changes), "baseline": baseline}
 

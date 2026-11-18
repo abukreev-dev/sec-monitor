@@ -62,9 +62,10 @@ def render(cfg, payload, priority):
                   "CVSS: " + cvss_text(d.get("cvss")) + " / KEV: " + ("да" if d.get("kev") else "нет подтверждения"),
                   "Исправление: " + label(d.get("fix_status", "unknown")) + " / " + fixed,
                   "Источник: " + str(d.get("source", "unknown")) + " " + str(d.get("url", ""))]
-    lines += ["Монитор ничего не обновляет. Сверьте advisory и источник пакета; изменения выполняет администратор. Затем повторите scan.",
-              "Подробности и инструкции: security-monitor report",
-              "Подготовлено: " + dt.datetime.now(ZoneInfo(cfg["timezone"])).isoformat(timespec="seconds")]
+    if kind != "health":
+        lines += ["Монитор ничего не обновляет. Сверьте advisory и источник пакета; изменения выполняет администратор. Затем повторите scan.",
+                  "Подробности и инструкции: security-monitor report"]
+    lines += ["Подготовлено: " + dt.datetime.now(ZoneInfo(cfg["timezone"])).isoformat(timespec="seconds")]
     for notice in payload.get("notices", []):
         lines += ["Attribution источника:", json.dumps(notice, ensure_ascii=False)]
     return "\n".join(clean_text(line, max(800, len(line))) for line in lines)

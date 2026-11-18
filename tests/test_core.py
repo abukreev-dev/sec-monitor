@@ -147,7 +147,7 @@ class StateTests(Base):
             store.run_failed("os", "timeout")
             store.run_failed("os", "timeout")
             self.assertEqual(list(store.findings())[0]["remediation"], "open")
-            self.assertEqual(store.db.execute("SELECT count(*) FROM outbox").fetchone()[0], 2)
+            self.assertEqual(store.db.execute("SELECT count(*) FROM outbox").fetchone()[0], 1)
             self.assertTrue(store.meta("baseline:os"))
 
     def test_missing_finding_not_automatically_fixed(self):

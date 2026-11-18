@@ -174,10 +174,25 @@ def scan(cfg, kind="os", path=None, image=None, archive=None):
         argv.extend(["--image-src", "remote", image])
     started = time.monotonic()
     try:
-        run(argv, timeout=cfg["scan_timeout"] + 20, max_output=1024 * 1024,
-            file_limit=2 * 1024**3,
-            env={"GOMAXPROCS": "1", "GOMEMLIMIT": "600MiB", "TRIVY_DISABLE_TELEMETRY": "true",
-                 "TMPDIR": str(private_dir(state / "tmp")), "DOCKER_CONFIG": str(private_dir(state / "registry"))})
+        kwargs = {"timeout": cfg["scan_timeout"] + 20, "max_output": 1024 * 1024,
+                  "file_limit": 2 * 1024**3,
+                  "env": {"GOMAXPROCS": "1", "GOMEMLIMIT": "600MiB", "TRIVY_DISABLE_TELEMETRY": "true",
+                          "TMPDIR": str(private_dir(state / "tmp")), "DOCKER_CONFIG": str(private_dir(state / "registry"))}}
+        try:
+            run(argv, **kwargs)
+        except MonitorError as exc:
+            if "не удалось загрузить данные" not in str(exc):
+                raise
+            try:
+                cached = bounded_json(cache / "trivy/db/metadata.json")
+                age = age_seconds(cached.get("UpdatedAt"))
+                valid = (cache / "trivy/db/trivy.db").is_file() and -3600 <= age <= cfg["db_max_age_hours"] * 3600
+            except (OSError, MonitorError):
+                valid = False
+            if not valid:
+                raise
+            temporary.unlink(missing_ok=True)
+            run(argv[:2] + ["--skip-db-update"] + argv[2:], **kwargs)
         metadata = bounded_json(cache / "trivy/db/metadata.json")
         age = age_seconds(metadata.get("UpdatedAt"))
         if age < -3600 or age > cfg["db_max_age_hours"] * 3600:

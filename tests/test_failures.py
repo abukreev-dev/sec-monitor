@@ -17,6 +17,56 @@ from security_monitor.versions import wp_affected
 
 
 class FailureTests(unittest.TestCase):
+    def test_os_incident_is_delayed_deduplicated_and_recovered_once(self):
+        from unittest.mock import patch
+        fresh = {"name": "os", "status": "error", "last_success": utcnow(), "error": "download failed"}
+        overdue = {**fresh, "last_success": "2000-01-01T00:00:00+00:00"}
+        recovered = {**fresh, "status": "fresh", "error": None}
+        def result(item):
+            return {"adapters": [item, {"name": "scheduler:scan", "status": "error"}]}
+        with Store(self.cfg["state_dir"]) as store, \
+             patch("security_monitor.health.inventory.platform_status", return_value={"status": "unsupported"}), \
+             patch("security_monitor.health.evaluate") as evaluate:
+            evaluate.return_value = result(fresh)
+            health.record_health(store, self.cfg)
+            self.assertEqual(store.db.execute("select count(*) from outbox").fetchone()[0], 0)
+            evaluate.return_value = result(overdue)
+            health.record_health(store, self.cfg)
+            health.record_health(store, self.cfg)
+            self.assertEqual(store.db.execute("select count(*) from outbox").fetchone()[0], 1)
+            evaluate.return_value = result(recovered)
+            health.record_health(store, self.cfg)
+            health.record_health(store, self.cfg)
+            payloads = [json.loads(r[0])["text"] for r in store.db.execute("select payload from outbox order by id")]
+            self.assertEqual(len(payloads), 2)
+            self.assertIn("диагностика", payloads[0])
+            self.assertIn("Действия не требуются", payloads[1])
+            rendered = notifier.render(self.cfg, {"kind": "health", "text": payloads[1]}, "SYSTEM")
+            self.assertNotIn("advisory", rendered)
+
+    def test_download_failure_retries_only_with_fresh_existing_db(self):
+        db = self.root / "state/cache/trivy/db"
+        db.mkdir(parents=True)
+        (db / "trivy.db").write_bytes(b"fixture")
+        (db / "metadata.json").write_text(json.dumps({"UpdatedAt": utcnow()}))
+        calls = []
+        def attempt(argv, **kwargs):
+            calls.append(argv)
+            if len(calls) == 1:
+                raise MonitorError("trivy: exit 1: не удалось загрузить данные")
+            Path(argv[argv.index("--output") + 1]).write_text('{"kind":"schema","version":1}\n{"kind":"target","class":"os-pkgs","type":"ubuntu"}\n{"kind":"complete","version":1}\n')
+            return "", ""
+        with patch("security_monitor.scanner.executable", return_value="fake-trivy"), patch("security_monitor.scanner.run", side_effect=attempt):
+            scanner.scan(self.cfg)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("--skip-db-update", calls[1])
+        (db / "metadata.json").write_text(json.dumps({"UpdatedAt": "2000-01-01T00:00:00Z"}))
+        calls.clear()
+        with patch("security_monitor.scanner.executable", return_value="fake-trivy"), patch("security_monitor.scanner.run", side_effect=attempt):
+            with self.assertRaises(MonitorError):
+                scanner.scan(self.cfg)
+        self.assertEqual(len(calls), 1)
+
     def test_wordfence_attempt_budget_survives_interrupted_download(self):
         from security_monitor import feeds
         def interrupted(*a, **kw):

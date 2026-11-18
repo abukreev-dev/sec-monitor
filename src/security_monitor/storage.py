@@ -16,7 +16,8 @@ SCHEMA = 1
 def detail(item):
     fields = ("vuln", "component_label", "priority", "installed", "applicability", "severity", "kev", "source", "url", "cvss", "published_at",
               "vendor_fixed", "upstream_fixed", "repo_fixed", "fix_status", "remediation", "notice",
-              "scanner_status", "applicability_reason", "action", "kernel_state", "running_kernel", "fixed_kernel")
+              "scanner_status", "applicability_reason", "action", "kernel_state", "running_kernel", "fixed_kernel",
+              "observed_version", "installed_fix_confirmed", "verification")
     return {k: item[k] for k in fields if k in item}
 
 

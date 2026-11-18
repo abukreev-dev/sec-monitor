@@ -54,7 +54,9 @@ def render(cfg, payload, priority):
     for d in payload.get("details", []):
         fixed = d.get("repo_fixed") or d.get("vendor_fixed") or ", ".join(d.get("upstream_fixed", [])) or "не подтверждено"
         lines += ["", f"{d.get('priority', 'приоритет не указан')} · {d.get('vuln')} · {d.get('component_label')}",
-                  "Установлено: " + str(d.get("installed", "неизвестно")),
+                  "Решение: " + actions.recommendation(d)["summary"],
+                  ("Ранее обнаружено: " if d.get("observed_version") else "Установлено: ") + str(d.get("installed", "неизвестно")),
+                  *(["Установлено при последней проверке пакетов: " + str(d["observed_version"])] if d.get("observed_version") else []),
                   "Применимость: " + label(d.get("applicability", "unknown")),
                   "Оценка: " + d.get("applicability_reason", "см. источник и локальный отчёт"),
                   "CVSS: " + cvss_text(d.get("cvss")) + " / KEV: " + ("да" if d.get("kev") else "нет подтверждения"),

@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from security_monitor import actions, engine, notifier
+from security_monitor import actions, engine, notifier, report
 from test_core import Base, row
 
 
@@ -25,6 +25,45 @@ def version_ge(a, b):
 
 
 class ActionTests(Base):
+    def test_installed_fix_does_not_recommend_another_update(self):
+        finding = row(installed="1.0", observed_version="1.1", installed_fix_confirmed=True,
+                      remediation="update_installed_pending_verification", fix_status="repo_fix_available", repo_fixed="1.1")
+        self.assertEqual(actions.recommendation(finding)["code"], "fix_pending_scan")
+        text = notifier.render(self.cfg, {"kind": "changes", "count": 1, "kinds": [], "ids": [], "details": [finding]}, "P3")
+        self.assertIn("Установлено при последней проверке пакетов: 1.1", text)
+        self.assertIn("Исправленная версия уже установлена", text)
+        self.assertNotIn("Подготовить ручное обновление", text)
+
+    def test_package_observation_reports_installed_fix_not_repo_only(self):
+        package = {"version": "1.1", "origin": "Ubuntu", "candidate": "1.1", "candidate_origin": "Ubuntu", "held": False}
+        inventory = {"packages": {"openssl": package}, "apt_age_seconds": 60}
+        with self.store() as store:
+            store.reconcile("os", [row(installed="1.0", vendor_fixed="1.1")], {}, engine.verify_os)
+            with patch("security_monitor.engine.inventory.package_inventory", return_value=inventory), \
+                 patch("security_monitor.engine.inventory.os_release", return_value={"ID": "ubuntu"}), \
+                 patch("security_monitor.engine.dpkg_ge", return_value=True):
+                engine.observe_updates(store, self.cfg)
+            finding = json.loads(store.db.execute("select payload from findings").fetchone()[0])
+            event = store.db.execute("select kind,payload from events order by id desc limit 1").fetchone()
+            self.assertEqual(event["kind"], "update_detected")
+            self.assertTrue(finding["installed_fix_confirmed"])
+            self.assertEqual(json.loads(event["payload"])["detail"]["observed_version"], "1.1")
+            self.assertEqual(finding["action"]["code"], "fix_pending_scan")
+
+    def test_changed_version_without_trusted_fix_does_not_claim_fixed(self):
+        finding = row(observed_version="1.1", remediation="update_installed_pending_verification")
+        self.assertEqual(actions.recommendation(finding)["code"], "version_pending_scan")
+
+    def test_digest_names_actions_and_preserves_unresolved(self):
+        groups = [{"priority": "P2", "component": "openssl", "vuln": "CVE-2026-1234", "action": {"code": "plan_update", "summary": "Обновить пакет"}},
+                  {"priority": "P1", "component": "old-kernel", "vuln": "CVE-2026-1235", "action": {"code": "component_absent", "summary": "Пакет отсутствует"}},
+                  {"priority": "P3", "component": "sos", "vuln": "CVE-2026-1236", "action": {"code": "fix_pending_scan", "summary": "Ожидается скан"}}]
+        text = report.digest_text(groups, "ok")
+        self.assertIn("openssl · CVE-2026-1234: Обновить пакет", text)
+        self.assertIn("пакет отсутствует в инвентаре: 1", text)
+        self.assertIn("исправление установлено, ожидается скан: 1", text)
+        self.assertNotIn("Подтверждённых действий для администратора", text)
+
     def test_userspace_kernel_tools_are_not_fixed_by_reboot(self):
         finding = kernel_row()
         finding["component"] = "linux-tools-6.8.0-146"

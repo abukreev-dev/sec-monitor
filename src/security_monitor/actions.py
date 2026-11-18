@@ -58,6 +58,13 @@ def kernel_evidence(row, snapshot, cache=None):
 def recommendation(row):
     if row.get("remediation") == "remediated_verified":
         return {"code": "verified", "summary": "Пакетное исправление проверено; отдельно проверьте работающие процессы.", "steps": []}
+    if row.get("remediation") == "update_installed_pending_verification":
+        version = row.get("observed_version", "неизвестна")
+        if row.get("installed_fix_confirmed"):
+            return {"code": "fix_pending_scan", "summary": "Исправленная версия уже установлена; ожидается подтверждение следующим сканированием.",
+                    "reason": "Обнаружена установленная версия: " + str(version), "steps": []}
+        return {"code": "version_pending_scan", "summary": "Версия пакета изменилась; монитор проверит исправление при следующем сканировании.",
+                "reason": "Обнаружена установленная версия: " + str(version) + "; применимость исправления пока не подтверждена.", "steps": []}
     state = row.get("kernel_state")
     if state == "running_affected_fix_installed":
         return {"code": "reboot_required", "summary": "Запланировать перезагрузку: исправленное ядро уже установлено.",
@@ -68,17 +75,20 @@ def recommendation(row):
         return {"code": "inactive_kernel", "summary": "Срочное действие по работающему ядру не требуется; проверить оставшиеся старые пакеты.",
                 "reason": f"Работающее ядро {row['running_kernel']} не ниже известной исправленной сборки для этой CVE.",
                 "steps": ["Старый установленный пакет остаётся находкой. Сохраните резервное ядро; удаление решает администратор."]}
+    if row.get("verification", "").startswith("Компонент больше не найден"):
+        return {"code": "component_absent", "summary": "Пакет больше не обнаружен; запись сохранена для истории.",
+                "reason": "Удаление пакета не подтверждает состояние работающих процессов или других копий.", "steps": []}
     if row.get("applicability") != "affected":
-        return {"code": "review_applicability", "summary": "Проверить применимость по advisory поставщика; подтверждённого плана обновления пока нет.",
+        return {"code": "review_applicability", "summary": "Монитор не смог подтвердить применимость и выбрать обновление; нужна ручная оценка advisory.",
                 "reason": row.get("applicability_reason", "Источник или применимость требуют проверки."), "steps": []}
     if row.get("fix_status") == "repo_fix_available" and row.get("repo_fixed"):
         return {"code": "plan_update", "summary": "Подготовить ручное обновление пакета до доступной исправленной версии.",
                 "reason": "Доступная версия: " + str(row["repo_fixed"]),
                 "steps": ["Проверьте план зависимостей и резервную копию; команды проверки есть в локальном отчёте."]}
     if row.get("vendor_fixed") or row.get("upstream_fixed"):
-        return {"code": "check_fix_availability", "summary": "Проверить получение исправленной версии; доступность локально не подтверждена.",
-                "steps": ["Сверьте advisory и настройки источника пакета перед ручным обновлением."]}
-    return {"code": "monitor_advisory", "summary": "Готового подтверждённого исправления нет; проверить условия эксплуатации и следить за advisory.",
+        return {"code": "check_fix_availability", "summary": "Монитор не подтвердил доступность исправления в настроенных источниках; нужна проверка APT и advisory.",
+                "steps": []}
+    return {"code": "monitor_advisory", "summary": "Монитор не установил наличие исправления; нужна оценка условий эксплуатации и advisory.",
             "steps": []}
 
 

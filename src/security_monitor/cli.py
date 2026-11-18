@@ -220,14 +220,11 @@ def main(argv=None):
                 return int(bool(result.get("failed")))
             if cmd == "digest":
                 groups = report.grouped(store)
-                counts = {}
-                for g in groups:
-                    counts[g["priority"]] = counts.get(g["priority"], 0) + 1
                 date = dt.datetime.now(ZoneInfo(cfg["timezone"])).date().isoformat()
                 current = health.evaluate(store, cfg)
-                text = f"Группы уязвимостей: {len(groups)}; {counts}. Мониторинг: {current['status']}."
+                text = report.digest_text(groups, current["status"])
                 queued = store.queue_digest(date, {"kind": "digest", "scope": "monitor", "text": text,
-                                                  "actions": actions.summaries(groups)})
+                                                  "actions": []})
                 output({"status": "queued" if queued else "already_queued", "date": date})
                 return 0
             if cmd == "backup":

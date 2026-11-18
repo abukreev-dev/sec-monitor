@@ -248,7 +248,12 @@ def observe_updates(store, cfg):
             updated = dict(data)
             event_kind = None
             if current["version"] != data["installed"]:
-                updated.update(observed_version=current["version"], remediation="update_installed_pending_verification")
+                expected = {"ubuntu": "Ubuntu", "debian": "Debian"}.get(os_id)
+                fixed = data.get("vendor_fixed")
+                confirmed = bool(expected and current.get("origin") == expected and fixed and
+                                 dpkg_ge(current["version"], fixed) is True)
+                updated.update(observed_version=current["version"], remediation="update_installed_pending_verification",
+                               installed_fix_confirmed=confirmed)
                 event_kind = "update_detected"
             fix, candidate = apt_fix(current, data.get("vendor_fixed"), {**cfg, "os_id": os_id}, snapshot["apt_age_seconds"])
             updated.update(fix_status=fix, repo_fixed=candidate, held=current["held"])
@@ -257,7 +262,7 @@ def observe_updates(store, cfg):
             updated["action"] = actions.recommendation(updated)
             if data.get("kernel_state") and (data.get("kernel_state"), data.get("running_kernel")) != (updated.get("kernel_state"), updated.get("running_kernel")):
                 event_kind = "kernel_runtime_changed"
-            if data.get("fix_status") != "repo_fix_available" and fix == "repo_fix_available":
+            if data.get("fix_status") != "repo_fix_available" and fix == "repo_fix_available" and event_kind != "update_detected":
                 event_kind = "repo_fix_available"
             if digest(updated) != old["fingerprint"]:
                 revision = old["revision"] + 1

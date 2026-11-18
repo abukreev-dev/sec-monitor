@@ -9,8 +9,10 @@ from . import actions
 
 
 def instructions(row):
-    plan = row.get("action") or actions.recommendation(row)
+    plan = actions.recommendation(row)
     prefix = ["Что делать: " + plan["summary"], *(["Почему: " + plan["reason"]] if plan.get("reason") else []), *plan.get("steps", [])]
+    if plan["code"] in {"fix_pending_scan", "version_pending_scan", "component_absent", "verified"}:
+        return prefix
     if row["applicability"] != "affected":
         return prefix + ["Применимость не подтверждена. Проверьте происхождение пакета/slug и advisory; не применяйте Ubuntu-фикс к сторонней сборке автоматически."]
     if row.get("kernel_state") in {"running_affected_fix_installed", "running_fixed_old_package"}:
@@ -42,8 +44,9 @@ def instructions(row):
 def grouped(store, priorities=None, open_only=True):
     groups = {}
     for row in store.findings(open_only=open_only, priorities=priorities):
+        action = actions.recommendation(row)
         key = (row["scope"], row["vuln"], row.get("source_package", row["component_label"]),
-               row["priority"], row["applicability"], row["fix_status"], row["remediation"])
+               row["priority"], row["applicability"], row["fix_status"], row["remediation"], action["code"])
         if key not in groups:
             groups[key] = {"scope": row["scope"], "vuln": row["vuln"], "priority": row["priority"],
                            "component": clean_text(row.get("source_package", row["component_label"])),
@@ -54,7 +57,8 @@ def grouped(store, priorities=None, open_only=True):
                            "installed": set(), "vendor_fixed": set(), "upstream_fixed": set(), "repo_fixed": set(),
                            "instructions": instructions(row), "notice": row.get("notice", {}),
                            "runtime_verification": row.get("runtime_verification", "unknown")}
-            groups[key].update({k: row.get(k) for k in ("action", "running_kernel", "kernel_state", "fixed_kernel", "scanner_status", "applicability_reason")})
+            groups[key].update({k: row.get(k) for k in ("running_kernel", "kernel_state", "fixed_kernel", "scanner_status", "applicability_reason")})
+            groups[key]["action"] = action
         group = groups[key]
         group["links"] += 1
         group["installed"].add(row["installed"])
@@ -68,6 +72,30 @@ def grouped(store, priorities=None, open_only=True):
             g[k] = sorted(g[k])
         result.append(g)
     return sorted(result, key=lambda x: (x["priority"], x["scope"], x["vuln"], x["component"]))
+
+
+def digest_text(groups, health_status, limit=8):
+    """Prioritise named actions; keep unresolved and historical evidence visible."""
+    ranks = {"reboot_required": 0, "plan_update": 1, "check_fix_availability": 2,
+             "review_applicability": 3, "monitor_advisory": 4, "version_pending_scan": 5,
+             "fix_pending_scan": 6, "inactive_kernel": 7, "component_absent": 8}
+    waiting = {"fix_pending_scan", "version_pending_scan"}
+    actionable = [g for g in groups if g["action"]["code"] not in {"component_absent", "inactive_kernel", "verified", *waiting}]
+    historical = sum(g["action"]["code"] == "component_absent" for g in groups)
+    pending = sum(g["action"]["code"] == "fix_pending_scan" for g in groups)
+    pending_other = sum(g["action"]["code"] == "version_pending_scan" for g in groups)
+    lines = [f"Мониторинг: {health_status}. Открытых групп: {len(groups)}; "
+             f"пакет отсутствует в инвентаре: {historical}; исправление установлено, ожидается скан: {pending}; "
+             f"версия изменилась, результат не подтверждён: {pending_other}."]
+    if actionable:
+        lines.append(f"Требуют действия или уточнения: {len(actionable)} групп. Первые {min(limit, len(actionable))}:")
+        for g in sorted(actionable, key=lambda x: (x["priority"], ranks.get(x["action"]["code"], 9), x["component"], x["vuln"]))[:limit]:
+            lines.append(f"{g['priority']} · {g['component']} · {g['vuln']}: {g['action']['summary']}")
+        if len(actionable) > limit:
+            lines.append("Показаны не все группы: security-monitor report --limit 0")
+    else:
+        lines.append("Подтверждённых действий для администратора по текущим данным нет; незавершённые проверки остаются в отчёте.")
+    return "\n".join(lines)
 
 
 def text_report(groups, limit=50):

@@ -1,5 +1,6 @@
 """Telegram plain text, strict API acknowledgement, persistent retries."""
 import datetime as dt
+import hashlib
 import json
 import os
 import tempfile
@@ -92,7 +93,8 @@ def message_parts(text, limit=3500):
 def write_notification_log(store, row, payload, rendered, retention_days):
     """Keep the complete notification and the baseline findings in a private file."""
     directory = private_dir(store.directory / "notification-logs")
-    destination = directory / ("notification-" + str(row["id"]) + ".jsonl")
+    event_hash = hashlib.sha256(row["event_key"].encode("utf-8")).hexdigest()[:16]
+    destination = directory / ("notification-" + str(row["id"]) + "-" + event_hash + ".jsonl")
     if destination.is_symlink():
         raise MonitorError("Журнал уведомления не должен быть symlink")
     if destination.exists():

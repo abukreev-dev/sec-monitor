@@ -115,7 +115,8 @@ class Store:
             if selected:
                 self.queue(digest([x["key"] for x in selected]), {"kind": "changes", "scope": scope,
                            "count": len(selected), "ids": sorted({x["vuln"] for x in selected})[:12],
-                           "kinds": sorted({x["kind"] for x in selected}), **message_details(selected)}, priority)
+                           "kinds": sorted({x["kind"] for x in selected}), "event_keys": [x["key"] for x in selected],
+                           **message_details(selected)}, priority)
 
     def queue_digest(self, date, payload):
         with self.db:
@@ -123,11 +124,12 @@ class Store:
             key = "digest:" + date
             if self.db.execute("SELECT 1 FROM outbox WHERE event_key=?", (key,)).fetchone():
                 return False
-            counts, ids = Counter(), set()
-            for row in self.db.execute("SELECT e.kind,e.payload FROM digest_events d JOIN events e USING(event_key) WHERE d.digested_at IS NULL"):
+            counts, ids, event_keys = Counter(), set(), []
+            for row in self.db.execute("SELECT e.event_key,e.kind,e.payload FROM digest_events d JOIN events e USING(event_key) WHERE d.digested_at IS NULL"):
+                event_keys.append(row["event_key"])
                 counts[row["kind"]] += 1
                 ids.add(json.loads(row["payload"]).get("vuln"))
-            self.queue(key, {**payload, "deferred_events": sum(counts.values()), "deferred_kinds": dict(counts),
+            self.queue(key, {**payload, "event_keys": event_keys, "deferred_events": sum(counts.values()), "deferred_kinds": dict(counts),
                              "deferred_cves": len(ids - {None})})
             self.db.execute("UPDATE digest_events SET digested_at=? WHERE digested_at IS NULL", (utcnow(),))
             return True

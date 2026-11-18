@@ -152,6 +152,7 @@ def enrich_kev(store, ids):
         for (scope, priority), values in changed.items():
             store.queue(digest([v["key"] for v in values]), {"kind": "changes", "scope": scope,
                         "count": len(values), "ids": sorted({v["vuln"] for v in values})[:12], "kinds": ["kev_added"],
+                        "event_keys": [v["key"] for v in values],
                         **message_details(values)}, priority)
     return sum(map(len, changed.values()))
 

@@ -1,10 +1,13 @@
 """Telegram plain text, strict API acknowledgement, persistent retries."""
 import datetime as dt
 import json
+import os
+import tempfile
+import time
 from zoneinfo import ZoneInfo
 
 from .feeds import HTTPFailure, request_json
-from .util import MonitorError, clean_text, lock, utcnow
+from .util import MonitorError, clean_text, lock, utcnow, private_dir
 from .labels import label
 from . import actions
 
@@ -86,6 +89,57 @@ def message_parts(text, limit=3500):
     return parts
 
 
+def write_notification_log(store, row, payload, rendered, retention_days):
+    """Keep the complete notification and the baseline findings in a private file."""
+    directory = private_dir(store.directory / "notification-logs")
+    destination = directory / ("notification-" + str(row["id"]) + ".jsonl")
+    if destination.is_symlink():
+        raise MonitorError("Журнал уведомления не должен быть symlink")
+    if destination.exists():
+        return destination
+    fd, name = tempfile.mkstemp(prefix=".notification-", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            os.fchmod(out.fileno(), 0o600)
+            out.write(json.dumps({"type": "notification", "created_at": row["created_at"],
+                                  "logged_at": utcnow(), "priority": row["priority"], "text": rendered,
+                                  "findings_note": "Текущее состояние на момент записи журнала" if payload.get("kind") == "baseline" else None}, ensure_ascii=False) + "\n")
+            if payload.get("kind") == "baseline":
+                for finding in store.db.execute("SELECT payload FROM findings WHERE scope=? ORDER BY priority,vuln,component", (payload.get("scope"),)):
+                    out.write('{"type":"finding","data":' + finding[0] + '}\n')
+            event_keys = payload.get("event_keys", [])
+            for offset in range(0, len(event_keys), 500):
+                batch = event_keys[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                for event in store.db.execute("SELECT event_key,kind,created_at,payload FROM events WHERE event_key IN (" + placeholders + ")", batch):
+                    out.write(json.dumps({"type": "event", "key": event["event_key"], "kind": event["kind"],
+                                          "created_at": event["created_at"], "data": json.loads(event["payload"])}, ensure_ascii=False) + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(name, destination)
+        for old in directory.glob("notification-*.jsonl"):
+            if old != destination and old.is_file() and not old.is_symlink() and time.time() - old.stat().st_mtime > retention_days * 86400:
+                old.unlink()
+        return destination
+    except OSError as exc:
+        raise MonitorError("Не удалось сохранить полный журнал уведомления") from exc
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def compact_message(rendered, log_path, limit=3500):
+    """Keep one UTF-16 bounded message with an explicit pointer to the full log."""
+    suffix = "\n\nПолный журнал: " + str(log_path)
+    if len((rendered + suffix).encode("utf-16-le")) // 2 <= limit:
+        return rendered + suffix
+    suffix = "\n\nСообщение сокращено." + suffix
+    budget = limit - len(suffix.encode("utf-16-le")) // 2
+    if budget <= 0:
+        raise MonitorError("Путь журнала превышает лимит сообщения")
+    return message_parts(rendered, budget)[0] + suffix
+
+
 def send(credentials, text, fetch=request_json, proxy_url=None):
     token, chat = credentials.get("TELEGRAM_BOT_TOKEN"), credentials.get("TELEGRAM_CHAT_ID")
     if not token or not chat:
@@ -119,7 +173,9 @@ def flush(store, cfg, credentials, fetch=request_json):
             try:
                 payload = json.loads(row["payload"])
                 if "_parts" not in payload:
-                    payload["_parts"] = message_parts(render(cfg, payload, row["priority"]))
+                    rendered = render(cfg, payload, row["priority"])
+                    log = write_notification_log(store, row, payload, rendered, cfg["artifact_retention_days"])
+                    payload["_parts"] = [compact_message(rendered, log)]
                     payload["_delivered_parts"] = 0
                     with store.db:
                         store.db.execute("UPDATE outbox SET payload=? WHERE id=?", (json.dumps(payload, ensure_ascii=False), row["id"]))

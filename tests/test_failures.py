@@ -158,7 +158,7 @@ class FailureTests(unittest.TestCase):
             return 200, {}, {"ok": True, "result": {"message_id": len(calls)}}
         with Store(self.cfg["state_dir"]) as store:
             with store.db:
-                store.queue("long", {"kind": "test", "text": "x" * 5000, "notices": [{"notice": "License 🚨" * 1000}]})
+                store.queue("long", {"kind": "test", "text": "x" * 5000, "_parts": ["first", "License second"], "_delivered_parts": 0})
             small_budget = {**self.cfg, "max_notifications_per_run": 1}
             first = notifier.flush(store, small_budget, credentials, accept)
             self.assertEqual(first["parts_sent"], 1)
@@ -170,6 +170,60 @@ class FailureTests(unittest.TestCase):
         self.assertGreater(len(calls), 1)
         self.assertNotEqual(calls[0], calls[1])
         self.assertIn("License", "".join(calls))
+
+    def test_new_long_notification_is_single_message_and_full_log(self):
+        calls = []
+        def accept(url, **kwargs):
+            calls.append(json.loads(kwargs["data"])["text"])
+            return 200, {}, {"ok": True, "result": {"message_id": 1}}
+        with Store(self.cfg["state_dir"]) as store:
+            with store.db:
+                store.queue("long-new", {"kind": "test", "text": "🚨" * 4000})
+            notifier.flush(store, self.cfg, {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "fake"}, accept)
+            self.assertEqual(len(calls), 1)
+            self.assertLessEqual(len(calls[0].encode("utf-16-le")) // 2, 3500)
+            self.assertIn("Сообщение сокращено", calls[0])
+            logs = list((store.directory / "notification-logs").glob("*.jsonl"))
+            self.assertEqual(len(logs), 1)
+            self.assertIn("🚨" * 4000, json.loads(logs[0].read_text())["text"])
+            self.assertEqual(logs[0].stat().st_mode & 0o777, 0o600)
+
+    def test_baseline_log_contains_all_findings(self):
+        from test_core import row
+        with Store(self.cfg["state_dir"]) as store:
+            store.reconcile("os", [row(), row(component="openssl2", component_label="openssl2")], {}, engine.verify_os)
+            def accept(url, **kwargs):
+                return 200, {}, {"ok": True, "result": {"message_id": 1}}
+            notifier.flush(store, self.cfg, {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "fake"}, accept)
+            log = next((store.directory / "notification-logs").glob("*.jsonl"))
+            lines = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertEqual(sum(x["type"] == "finding" for x in lines), 2)
+
+    def test_change_log_preserves_all_events(self):
+        from test_core import row
+        with Store(self.cfg["state_dir"]) as store:
+            store.reconcile("os", [row()], {}, engine.verify_os)
+            with store.db:
+                store.db.execute("delete from outbox")
+            store.reconcile("os", [row(vendor_fixed="1.1", fix_status="vendor_fix_available")], {}, engine.verify_os)
+            def accept(url, **kwargs):
+                return 200, {}, {"ok": True, "result": {"message_id": 1}}
+            notifier.flush(store, self.cfg, {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "fake"}, accept)
+            log = next((store.directory / "notification-logs").glob("*.jsonl"))
+            events = [json.loads(line) for line in log.read_text().splitlines() if '"type": "event"' in line]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["kind"], "fix_published")
+
+    def test_notification_waits_if_full_log_cannot_be_saved(self):
+        calls = []
+        with Store(self.cfg["state_dir"]) as store:
+            with store.db:
+                store.queue("log-error", {"kind": "test", "text": "details"})
+            with patch("security_monitor.notifier.write_notification_log", side_effect=MonitorError("log unavailable")):
+                result = notifier.flush(store, self.cfg, {"TELEGRAM_BOT_TOKEN": "fake", "TELEGRAM_CHAT_ID": "fake"}, lambda *a, **kw: calls.append(1))
+            self.assertEqual(result["failed"], 1)
+            self.assertEqual(calls, [])
+            self.assertIsNone(store.db.execute("select sent_at from outbox").fetchone()[0])
 
     def test_telegram_429_does_not_drop_queue(self):
         with Store(self.cfg["state_dir"]) as store:

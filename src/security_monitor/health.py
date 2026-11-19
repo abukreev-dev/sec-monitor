@@ -14,8 +14,31 @@ def evaluate(store, cfg, doctor=False):
     for kind, seconds in (("apps", 36 * 3600), ("wordpress", 2 * 3600), ("containers", 36 * 3600)):
         if cfg[kind]:
             expected.extend((kind + ":" + i["name"], seconds) for i in cfg[kind])
-        else:
+        elif kind != 'containers' or not cfg.get('docker_monitor'):
             adapters.append({"name": kind, "status": "not_configured", "note": "Нет настроенных областей; покрытие не заявлено"})
+    dynamic_scopes = set()
+    if cfg.get('docker_monitor'):
+        from .containers import scope_name
+        discovery = store.meta('docker-inventory') or {}
+        images = discovery.get('images', [])
+        pending, failed, stale, details = 0, 0, 0, []
+        for item in images:
+            scope = 'containers:' + scope_name(item['image_id'])
+            dynamic_scopes.add(scope)
+            row = store.db.execute('SELECT status,last_success FROM runs WHERE scope=?', (scope,)).fetchone()
+            if row and row['status'] == 'error':
+                failed += 1
+            elif not row or not row['last_success']:
+                pending += 1
+            elif age_seconds(row['last_success']) > 48 * 3600:
+                stale += 1
+            details.append({'image_id': item['image_id'], 'containers': [c['name'] for c in item['containers']],
+                            'status': row['status'] if row else 'not_scanned', 'last_success': row['last_success'] if row else None})
+        discovery_age = age_seconds(discovery.get('observed_at'))
+        status = 'not_scanned' if not discovery else 'stale' if discovery_age > 3 * 3600 or stale else 'error' if failed else 'not_scanned' if pending else 'fresh'
+        adapters.append({'name': 'docker', 'status': status, 'images': len(images), 'pending': pending,
+                         'failed': failed, 'stale': stale, 'last_inventory': discovery.get('observed_at'), 'details': details,
+                         'note': 'Проверяются образы; writable layers и volumes не входят в охват'})
     for scope, max_age in expected:
         run = store.db.execute("SELECT * FROM runs WHERE scope=?", (scope,)).fetchone()
         if not run:
@@ -38,9 +61,9 @@ def evaluate(store, cfg, doctor=False):
                     adapters[-1]["runtime"] = {"running_kernel": data.get("running_kernel"),
                                                "reboot_required": data.get("reboot_required"),
                                                "observed_at": data.get("observed_at")}
-    configured_scopes = {scope for scope, _ in expected}
+    configured_scopes = {scope for scope, _ in expected} | dynamic_scopes
     for row in store.db.execute("SELECT scope,last_success FROM runs"):
-        if row["scope"] not in configured_scopes:
+        if row["scope"] not in configured_scopes and not (cfg.get('docker_monitor') and row['scope'].startswith('containers:docker-')):
             count = store.db.execute("SELECT count(*) FROM findings WHERE scope=? AND remediation!='remediated_verified'", (row["scope"],)).fetchone()[0]
             adapters.append({"name": row["scope"], "status": "disabled_with_open_findings" if count else "disabled",
                              "last_success": row["last_success"], "findings": count,

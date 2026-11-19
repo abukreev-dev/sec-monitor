@@ -25,6 +25,19 @@ def version_ge(a, b):
 
 
 class ActionTests(Base):
+    def test_container_advice_never_tells_admin_to_upgrade_host_package(self):
+        finding = row(target_kind="containers", source="ubuntu", upstream_fixed=["1.2"],
+                      fix_status="upstream_fix_available")
+        plan = actions.recommendation(finding)
+        self.assertEqual(plan["code"], "container_rebuild")
+        instructions = "\n".join(report.instructions(finding))
+        self.assertIn("образ", instructions)
+        self.assertNotIn("apt-get", instructions)
+        self.assertNotIn("APT metadata", instructions)
+
+    def test_container_image_rescan_does_not_claim_running_deployment_fixed(self):
+        finding = row(target_kind="containers", remediation="needs_reverification", upstream_fixed=["1.2"])
+        self.assertEqual(actions.recommendation(finding)["code"], "container_reverify")
     def test_installed_fix_does_not_recommend_another_update(self):
         finding = row(installed="1.0", observed_version="1.1", installed_fix_confirmed=True,
                       remediation="update_installed_pending_verification", fix_status="repo_fix_available", repo_fixed="1.1")

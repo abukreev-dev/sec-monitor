@@ -16,7 +16,8 @@ DATA = Path("/var/lib/security-monitor")
 UNITS = Path("/etc/systemd/system")
 LAUNCHER = Path("/usr/local/bin/security-monitor")
 MARKER = "sec-monitor-managed-v1"
-JOBS = ("scan", "feeds", "health", "notify", "digest")
+JOBS = ("scan", "feeds", "health", "notify", "digest", "docker")
+EXPORTS = Path('/var/lib/security-monitor-exports')
 
 
 def systemctl(*args, check=True):
@@ -34,11 +35,53 @@ def assert_root():
 
 def unit_files(cfg):
     calendars = {"scan": "hourly", "feeds": "*-*-* *:00/15:00", "health": "*-*-* *:00/15:00",
-                 "notify": "*-*-* *:*:00", "digest": "*-*-* 09:00:00 " + cfg["timezone"]}
+                 "notify": "*-*-* *:*:00", "digest": "*-*-* 09:00:00 " + cfg["timezone"], "docker": "*-*-* *:00/30:00"}
     commands = {"scan": "scan --target all --scheduled", "feeds": "feeds refresh --source all --scheduled",
-                "health": "health --record", "notify": "notifications flush", "digest": "digest"}
+                "health": "health --record", "notify": "notifications flush", "digest": "digest", "docker": ""}
     files = {}
     for job in JOBS:
+        if job == 'docker':
+            files['security-monitor-docker.service'] = f'''# {MARKER}
+[Unit]
+Description=Security Monitor Docker image inventory and read-only scan
+After=docker.service
+[Service]
+Type=oneshot
+User=root
+Environment=PYTHONPATH=/opt/security-monitor/current/src
+ExecStart=/usr/bin/python3 -m security_monitor.containers collect /etc/security-monitor/config.json
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/security-monitor /var/lib/security-monitor-exports
+InaccessiblePaths=-/etc/security-monitor/secrets.env
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CPUQuota=100%
+MemoryMax=3G
+MemorySwapMax=0
+Nice=10
+IOWeight=10
+TimeoutStartSec=1800
+KillMode=control-group
+'''
+            files['security-monitor-docker.timer'] = f'''# {MARKER}
+[Unit]
+Description=Schedule Security Monitor Docker image scan
+[Timer]
+OnCalendar={calendars[job]}
+Persistent=true
+RandomizedDelaySec=60
+AccuracySec=1min
+Unit=security-monitor-docker.service
+[Install]
+WantedBy=timers.target
+'''
+            continue
         on_failure = "OnFailure=security-monitor-health.service\n" if job == "scan" else ""
         hide_secrets = "InaccessiblePaths=-/etc/security-monitor/secrets.env\n" if job in {"scan", "health", "digest"} else ""
         files[f"security-monitor-{job}.service"] = f"""# {MARKER}
@@ -98,6 +141,7 @@ WantedBy=timers.target
 
 def plan(cfg, trivy_path=None):
     return {"code": str(BASE), "config": str(ETC / "config.json"), "state": str(DATA),
+            "docker_export_directory": str(EXPORTS),
             "user": "security-monitor", "launcher": str(LAUNCHER), "units": sorted(unit_files(cfg)),
             "trivy": trivy_path or cfg["trivy_path"], "starts_timers": False,
             "system_packages_changed": False, "application_services_restarted": False,
@@ -184,6 +228,14 @@ def install(cfg, trivy_path=None, secrets_source=None, dry_run=False):
     atomic_write(ETC / ".managed", MARKER + "\n")
     os.chown(DATA, user.pw_uid, user.pw_gid)
     os.chmod(DATA, 0o700)
+    if EXPORTS.is_symlink() or (EXPORTS.exists() and (not EXPORTS.is_dir() or EXPORTS.stat().st_uid != 0 or
+            not (EXPORTS / '.managed').is_file() or (EXPORTS / '.managed').is_symlink() or
+            (EXPORTS / '.managed').read_text().strip() != MARKER)):
+        raise MonitorError("Каталог экспорта Docker занят или небезопасен")
+    EXPORTS.mkdir(mode=0o750, exist_ok=True)
+    os.chown(EXPORTS, 0, user.pw_gid)
+    os.chmod(EXPORTS, 0o750)
+    atomic_write(EXPORTS / '.managed', MARKER + '\n', 0o600)
     if not release.exists():
         staging = BASE / "releases" / (".staging-" + fingerprint)
         if staging.exists():

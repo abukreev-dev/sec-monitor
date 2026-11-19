@@ -318,14 +318,19 @@ class ScannerAndPolicyTests(Base):
         packages = inventory.parse_dpkg("pkg\tamd64\t1.0\tpkg\t1.0\tii \nold\tamd64\t0.1\told\t0.1\trc \n")
         self.assertEqual(set(packages), {"pkg"})
 
-    def test_units_have_no_root_no_docker_no_update(self):
+    def test_units_isolate_the_privileged_docker_collector(self):
         files = deploy.unit_files(self.cfg)
-        self.assertEqual(len(files), 10)
+        self.assertEqual(len(files), 12)
         for name, body in files.items():
             if name.endswith(".service"):
-                self.assertIn("User=security-monitor", body)
+                if name == 'security-monitor-docker.service':
+                    self.assertIn('User=root', body)
+                    self.assertIn('security_monitor.containers collect', body)
+                    self.assertIn('InaccessiblePaths=-/etc/security-monitor/secrets.env', body)
+                else:
+                    self.assertIn("User=security-monitor", body)
+                    self.assertIn("MemoryMax=1G", body)
                 self.assertIn("NoNewPrivileges=yes", body)
-                self.assertIn("MemoryMax=1G", body)
                 self.assertNotIn("apt-get", body)
                 self.assertNotIn("SupplementaryGroups=docker", body)
             else:

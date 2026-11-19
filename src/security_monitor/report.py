@@ -11,6 +11,8 @@ from . import actions
 def instructions(row):
     plan = actions.recommendation(row)
     prefix = ["Что делать: " + plan["summary"], *(["Почему: " + plan["reason"]] if plan.get("reason") else []), *plan.get("steps", [])]
+    if row.get("target_kind") == "containers":
+        return prefix
     if plan["code"] in {"fix_pending_scan", "version_pending_scan", "component_absent", "verified"}:
         return prefix
     if row["applicability"] != "affected":

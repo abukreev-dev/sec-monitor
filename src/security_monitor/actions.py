@@ -56,6 +56,16 @@ def kernel_evidence(row, snapshot, cache=None):
 
 
 def recommendation(row):
+    if row.get("target_kind") == "containers":
+        if row.get("remediation") == "needs_reverification":
+            return {"code": "container_reverify", "summary": "Монитор не подтвердил устранение в работающем контейнере.",
+                    "reason": "Повторная проверка образа сама по себе не подтверждает замену работающего контейнера.", "steps": []}
+        if row.get("upstream_fixed"):
+            return {"code": "container_rebuild", "summary": "Подготовить исправленный образ и заменить контейнер вручную.",
+                    "reason": "Источник указывает исправленную версию: " + ", ".join(row["upstream_fixed"]),
+                    "steps": ["Затем проверить запущенный образ повторным сканированием."]}
+        return {"code": "container_unresolved", "summary": "Монитор не подтвердил исправление для компонента образа.",
+                "reason": "Проверить статус у поставщика образа и условия эксплуатации.", "steps": []}
     if row.get("remediation") == "remediated_verified":
         return {"code": "verified", "summary": "Пакетное исправление проверено; отдельно проверьте работающие процессы.", "steps": []}
     if row.get("remediation") == "update_installed_pending_verification":

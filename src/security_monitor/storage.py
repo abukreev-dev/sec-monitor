@@ -17,7 +17,7 @@ def detail(item):
     fields = ("vuln", "component_label", "priority", "installed", "applicability", "severity", "kev", "source", "url", "cvss", "published_at",
               "vendor_fixed", "upstream_fixed", "repo_fixed", "fix_status", "remediation", "notice",
               "scanner_status", "applicability_reason", "action", "kernel_state", "running_kernel", "fixed_kernel",
-              "observed_version", "installed_fix_confirmed", "verification")
+              "observed_version", "installed_fix_confirmed", "verification", "target_kind")
     return {k: item[k] for k in fields if k in item}
 
 
@@ -234,9 +234,11 @@ class Store:
                     counts[item["priority"]] = counts.get(item["priority"], 0) + 1
                     if item["priority"] == "P1":
                         ids.add(item["vuln"])
-                self.queue("baseline:" + scope, {"kind": "baseline", "scope": scope, "count": len(present),
+                if not scope.startswith('containers:docker-') or ids or counts.get('P2'):
+                    self.queue("baseline:" + scope, {"kind": "baseline", "scope": scope, "count": len(present),
                                                  "counts": counts, "p1_ids": sorted(ids)[:12],
-                                                 **message_details(sorted(rows, key=lambda x: x["priority"]))}, "P1" if ids else "P3")
+                                                 **message_details(sorted(rows, key=lambda x: x["priority"]))},
+                               "P1" if ids else "P2" if counts.get('P2') else "P3")
             elif changes:
                 self.notify_changes(scope, changes)
             if scope != "os" and previous_run and previous_run[0] == "error":

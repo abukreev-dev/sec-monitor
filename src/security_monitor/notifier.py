@@ -32,6 +32,8 @@ def render(cfg, payload, priority):
     heading = f"СВОДКА (максимум {priority})" if payload.get("kind") == "baseline" else priority
     lines = [f"Security Monitor — {heading}", "Сервер: " + cfg["server_name"],
              "Область: " + clean_text(payload.get("scope", "monitor"), 80)]
+    if payload.get('container_names'):
+        lines.append('Контейнеры: ' + ', '.join(clean_text(x, 128) for x in payload['container_names'][:10]))
     kind = payload.get("kind")
     plans = payload.get("actions") or actions.summaries(payload.get("details", []))
     for plan in plans:
@@ -175,6 +177,14 @@ def flush(store, cfg, credentials, fetch=request_json):
             try:
                 payload = json.loads(row["payload"])
                 if "_parts" not in payload:
+                    scope = payload.get('scope', '')
+                    if scope.startswith('containers:docker-'):
+                        from .containers import scope_name
+                        discovery = store.meta('docker-inventory') or {}
+                        for item in discovery.get('images', []):
+                            if scope == 'containers:' + scope_name(item['image_id']):
+                                payload['container_names'] = [c['name'] for c in item['containers']]
+                                break
                     rendered = render(cfg, payload, row["priority"])
                     log = write_notification_log(store, row, payload, rendered, cfg["artifact_retention_days"])
                     payload["_parts"] = [compact_message(rendered, log)]

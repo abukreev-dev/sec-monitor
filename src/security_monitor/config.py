@@ -24,7 +24,7 @@ def defaults():
             "secrets_file": str(Path.home() / ".config/sec-monitor/secrets.env"),
             "notifications_enabled": False, "max_notifications_per_run": 10, "telegram_proxy_url": "",
             "apps": [], "wordpress": [], "containers": [],
-            "discovery_roots": ["/var/www", "/srv"], "allow_untested_os": False}
+            "discovery_roots": ["/var/www", "/srv"], "allow_untested_os": False, "docker_monitor": False}
 
 
 def load(path=None):
@@ -55,7 +55,7 @@ def validate(cfg):
                   "feed_max_age_hours", "artifact_retention_days", "max_notifications_per_run"):
         if type(cfg[field]) is not int or not 1 <= cfg[field] <= 86400:
             raise MonitorError(f"Некорректное ограничение: {field}")
-    for field in ("notifications_enabled", "allow_untested_os"):
+    for field in ("notifications_enabled", "allow_untested_os", "docker_monitor"):
         if type(cfg[field]) is not bool:
             raise MonitorError(f"{field}: ожидается boolean")
     proxy = cfg["telegram_proxy_url"]

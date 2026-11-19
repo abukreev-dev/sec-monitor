@@ -79,6 +79,7 @@ def normalize(result, snapshot, kind, cfg, kev_ids):
         if kind == "os" and vendor == "ubuntu" and not item.get("fixed"):
             uncertain = True
         row = {"component": component, "component_label": name, "vuln": item["id"],
+               "target_kind": kind,
                "installed": item["installed"], "vendor_fixed": item.get("fixed") if kind == "os" else None,
                "upstream_fixed": [item["fixed"]] if kind != "os" and item.get("fixed") else [],
                "repo_fixed": repo, "fix_status": fix, "origin": origin,

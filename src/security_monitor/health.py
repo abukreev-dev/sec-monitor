@@ -147,7 +147,20 @@ def record_health(store, cfg):
                 if name in {"os", "scheduler:scan"}:
                     continue
                 if status != previous.get(name) and status not in {"not_configured"}:
+                    text = "Состояние проверки: " + label(status)
+                    if name == 'docker':
+                        item = next(a for a in report['adapters'] if a['name'] == 'docker')
+                        if status == 'not_scanned' and item['images']:
+                            text = f"Первичная проверка образов продолжается: осталось {item['pending']} из {item['images']}. Действия не требуются."
+                        elif status == 'not_scanned':
+                            text = 'Инвентарь Docker ещё не получен; монитор выполнит проверку автоматически.'
+                        elif status == 'fresh':
+                            text = f"Проверка образов завершена: актуальны все {item['images']}."
+                        elif status == 'error':
+                            text = f"Не удалось проверить образов: {item['failed']}. Подробности: security-monitor doctor."
+                        elif status == 'stale':
+                            text = 'Инвентарь Docker или результаты проверки устарели. Подробности: security-monitor doctor.'
                     store.queue("health:" + digest([name, status, utcnow()]),
-                                {"kind": "health", "scope": name, "text": "Состояние проверки: " + label(status)}, "SYSTEM")
+                                {"kind": "health", "scope": name, "text": text}, "SYSTEM")
             store.set_meta("health-statuses", current)
         return report

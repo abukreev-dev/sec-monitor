@@ -60,7 +60,6 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CPUQuota=100%
 MemoryMax=3G
 MemorySwapMax=0
